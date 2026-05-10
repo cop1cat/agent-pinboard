@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+# A push that lands while CI is running on the same ref cancels the
+# in-flight run — saves runner minutes when you push a fixup commit.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    name: lint + tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python }}
+        run: uv python install ${{ matrix.python }}
+
+      - name: Sync dependencies (incl. langfuse + ws extras)
+        run: uv sync --python ${{ matrix.python }} --extra langfuse --extra ws
+
+      - name: Ruff
+        run: uv run --python ${{ matrix.python }} ruff check agent_pinboard/
+
+      - name: Pytest
+        # The same command CLAUDE.md / README document — so green CI
+        # means a contributor's local `uv run pytest` will also be green.
+        run: uv run --python ${{ matrix.python }} pytest -q --timeout=20
