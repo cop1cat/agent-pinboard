@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/dev/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/devru/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/api-reference/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/dev/api-reference/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/devru/api-reference/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/concepts/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/dev/concepts/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/devru/concepts/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/examples/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/dev/examples/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/devru/examples/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/extraction-rules/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/dev/extraction-rules/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/devru/extraction-rules/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/graph-tools/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/dev/graph-tools/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/devru/graph-tools/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/hooks-and-config/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/dev/hooks-and-config/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/devru/hooks-and-config/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/pitfalls/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/dev/pitfalls/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/devru/pitfalls/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/quickstart/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/dev/quickstart/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/devru/quickstart/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/ru/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/dev/ru/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/dev"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/ru/api-reference/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/dev/ru/api-reference/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/devapi-reference/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/ru/concepts/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/dev/ru/concepts/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/devconcepts/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/ru/examples/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/dev/ru/examples/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/devexamples/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/ru/extraction-rules/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/dev/ru/extraction-rules/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/devextraction-rules/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/ru/graph-tools/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/dev/ru/graph-tools/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/devgraph-tools/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/ru/hooks-and-config/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/dev/ru/hooks-and-config/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/devhooks-and-config/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/ru/pitfalls/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/dev/ru/pitfalls/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/devpitfalls/"/>
+    </url>
+    <url>
+        <loc>https://cop1cat.github.io/agent-pinboard/dev/ru/quickstart/</loc>
+        <lastmod>2026-05-10</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://cop1cat.github.io/agent-pinboard/dev/ru/quickstart/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://cop1cat.github.io/agent-pinboard/devquickstart/"/>
+    </url>
+</urlset>
