@@ -232,6 +232,76 @@ class TestAsyncTool:
         g = await aget_or_load_session(store, "tid-async")
         assert g.find_by_value("IP", "9.9.9.9") is not None
 
+    @pytest.mark.asyncio
+    async def test_async_dispatched_event_carries_result(
+        self, store: InMemoryStore
+    ) -> None:
+        """Async path through `adispatch_custom_event`: a BaseCallbackHandler
+        attached via `config["callbacks"]` on `ainvoke` receives the event."""
+        from langchain_core.callbacks import BaseCallbackHandler
+
+        from agent_pinboard import INGEST_EVENT
+        from tests._helpers import acall
+
+        seen: list[int] = []
+
+        class Recorder(BaseCallbackHandler):
+            def on_custom_event(
+                self, name, data, *, run_id, tags=None, metadata=None, **kw
+            ):
+                if name == INGEST_EVENT:
+                    seen.append(data["result"].new_nodes)
+
+        @pin(model=CloudTrailEvent)
+        @tool
+        async def afetch(value: str, runtime: ToolRuntime) -> dict:
+            """Async."""
+            return {"src_ip": "8.8.4.4", "actor": "a", "action": "X"}
+
+        graph = make_runner([afetch], store, async_mode=True)
+        await acall(
+            graph, "afetch", {"value": "v"}, "tid-async-cb",
+            callbacks=[Recorder()],
+        )
+        # Two new facts (IP + Action) plus the User-typed actor (string default
+        # — not a node-marked field) → the count comes from extract.py's rules.
+        assert seen and seen[0] >= 1
+
+
+class TestDispatchOutsideRunnableContext:
+    """`@pin` is also usable in plain unit-test code that calls the tool's
+    underlying ``func`` directly, bypassing ``invoke``. There is no
+    callback manager in scope; the decorator must swallow the no-context
+    error and not log any ERROR."""
+
+    def test_direct_func_call_dispatch_silent(
+        self, store: InMemoryStore, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from types import SimpleNamespace
+
+        import logging as stdlogging
+
+        @pin(model=CloudTrailEvent)
+        @tool
+        def fetch(value: str, runtime: ToolRuntime) -> dict:
+            """."""
+            return {"src_ip": "7.7.7.7", "actor": "a", "action": "X"}
+
+        runtime_stub = SimpleNamespace(
+            store=store,
+            config={"configurable": {"thread_id": "tid-direct"}},
+        )
+
+        with caplog.at_level(stdlogging.ERROR, logger="agent_pinboard.decorator"):
+            # Drive the wrapped function directly — no Runnable / no callback context.
+            fetch.func("v", runtime=runtime_stub)  # type: ignore[arg-type]
+
+        # Decorator must not have logged any dispatch failure.
+        assert not [
+            r for r in caplog.records
+            if "dispatch failed" in r.message
+        ]
+
 
 class TestSyncToolWithAsyncTransform:
     def test_rejected_at_decoration_time(self) -> None:

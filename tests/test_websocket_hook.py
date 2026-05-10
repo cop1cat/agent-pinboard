@@ -84,7 +84,7 @@ class TestIngestEventDispatch:
         graph.add_event(ev)
         new_fact = FactNode(
             id="x", node_type="IP", value="1.1.1.1",
-            canonical_value="1.1.1.1", properties={},
+            canonical_value="1.1.1.1",
             first_seen=datetime.now(UTC), last_seen=datetime.now(UTC),
         )
         edge = FactEdge(event_id=ev.id, target_id="x",
@@ -116,7 +116,7 @@ class TestIngestEventDispatch:
         graph.add_event(ev)
         linked = FactNode(
             id="y", node_type="IP", value="2.2.2.2",
-            canonical_value="2.2.2.2", properties={},
+            canonical_value="2.2.2.2",
             first_seen=datetime.now(UTC), last_seen=datetime.now(UTC),
         )
         h = WebSocketHook(thread_id_label="T")
@@ -192,7 +192,7 @@ class TestPayloads:
     def test_fact_node_payload(self) -> None:
         from agent_pinboard import FactNode
         n = FactNode(id="n", node_type="IP", value="1.1.1.1",
-                     canonical_value="1.1.1.1", properties={},
+                     canonical_value="1.1.1.1",
                      first_seen=datetime.now(UTC),
                      last_seen=datetime.now(UTC))
         payload = _node_to_payload(n)

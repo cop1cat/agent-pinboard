@@ -8,11 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Key sources of truth:
 
-- `README.md` — the authoritative technical spec (ТЗ). Every architectural decision is recorded there with rationale. **Treat it as load-bearing — do not drift from it silently.** If you want to deviate, surface the tradeoff in conversation first.
-- `REASEARCH.md` (the typo is intentional, the filename stays) — prior-art / landscape research. Its API examples are outdated (the early `Annotated[T, Fact(...)]` shape, replaced long ago by `node(type=Entity, ...)`). Read for context, not as API reference.
+- `README.md` — short English landing page (PyPI / GitHub face). The detailed Russian technical spec is `README.ru.md` — every architectural decision is recorded there with rationale. **Treat README.ru.md as load-bearing — do not drift from it silently.** If you want to deviate, surface the tradeoff in conversation first.
 - `TODO.md` — **not** a phase roadmap anymore (all three phases are done); a running list of known limitations, desired follow-ups, and explicit refactor candidates.
 - `docs/` — user-facing docs in **English** (`docs/en/`) and **Russian** (`docs/ru/`). Eight pages each: index, quickstart, concepts, extraction-rules, graph-tools, hooks-and-config, pitfalls, api-reference, examples. **Update both languages when changing user-facing behaviour.**
-- The equivalent sanity checks now live inside the test suite: `tests/test_acceptance.py` covers the README §16 acceptance criteria end-to-end, and `tests/test_decorator.py` / `tests/test_tools.py` exercise real `ToolRuntime` injection via `ToolNode` (the assumptions that the deleted `langgraph_check.py` used to verify).
+- The equivalent sanity checks now live inside the test suite: `tests/test_acceptance.py` covers the README.ru.md §16 acceptance criteria end-to-end, and `tests/test_decorator.py` / `tests/test_tools.py` exercise real `ToolRuntime` injection via `ToolNode` (the assumptions that the deleted `langgraph_check.py` used to verify).
 
 ## Common commands
 
@@ -76,7 +75,7 @@ Graph lives in LangGraph `Store` under namespace `("agent_pinboard", thread_id, 
 
 ## What is explicitly out of scope
 
-README §16 lists ~14 capabilities rejected with rationale and references to REASEARCH §E.2 risks. The ones to push back on hardest:
+README.ru.md §16 lists ~14 capabilities rejected with rationale. The ones to push back on hardest:
 
 - Bi-temporal model, confidence scoring, fuzzy entity resolution, state replacement, async deep-enrichment — deliberate tradeoffs, not oversights.
 - LLM in the runtime extraction path — violates the core principle (deterministic, free extraction).
@@ -89,7 +88,7 @@ If a change "while you're here" tries to add any of these, surface it as a real 
 
 ## Coordinates for finding things
 
-**Spec (README.md):**
+**Spec (README.ru.md):**
 - Data model — §5
 - Five extraction rules — §4.1, implemented via `match` statement
 - `@pin` pipeline (7 steps, lock on step 4 only) — §6.1, §9.1

@@ -52,7 +52,6 @@ class TestFactNodeShape:
             node_type="IP",
             value="1.1.1.1",
             canonical_value="1.1.1.1",
-            properties={},
             first_seen=now,
             last_seen=now,
         )

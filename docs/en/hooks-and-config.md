@@ -10,9 +10,16 @@ After every successful `@pin` ingest the decorator dispatches a
 
 This means the same dispatch mechanism that surfaces `on_tool_start` /
 `on_tool_end` / `on_llm_start` / etc. surfaces AgentPinBoard ingest
-events too — your handler gets one stream, parented under the
-LangChain run that emitted it (so e.g. Langfuse spans nest naturally
-under the tool span instead of floating as detached traces).
+events too — your handler gets one stream, with the dispatched event's
+`run_id` matching the LangChain run that emitted it. Whether downstream
+spans (e.g. Langfuse) actually nest under the tool span depends on the
+backend integration: pure `BaseCallbackHandler.on_custom_event` gives
+you the `run_id` and you decide what to do with it. To get
+auto-nesting in Langfuse specifically, register
+`langfuse.langchain.CallbackHandler` alongside `LangfuseHook` in the
+same `callbacks` list — the Langfuse-LangChain integration sets up
+the OpenTelemetry context that `client.start_observation` then
+attaches to.
 
 ### A minimal handler
 
@@ -56,7 +63,7 @@ reference to the freshly-loaded graph:
 | `events` | `list[EventNode]` | One per call (or one per item if `many=True`) |
 | `new_facts` | `list[FactNode]` | Brand-new facts created in this ingest |
 | `linked_facts` | `list[FactNode]` | Existing facts that this ingest re-linked |
-| `new_edges` | `list[FactEdge]` | One per fact occurrence in the model |
+| `new_edges` | `list[FactEdge]` | One per fact occurrence in the model. Edges are append-only with unique ids, so this is "all edges produced by this ingest" — there is no `linked_edges` counterpart. |
 | `graph` | `FactGraph` | The post-ingest graph (in-memory, this call's view) |
 
 A handler that wants per-node granularity iterates `events` /
@@ -76,7 +83,7 @@ processing it.
 Optional dependency. Install with:
 
 ```bash
-uv add 'agent_pinboard[langfuse]'        # or: pip install agent_pinboard[langfuse]
+uv add 'agent-pinboard[langfuse]'        # or: pip install agent-pinboard[langfuse]
 ```
 
 ```python
@@ -105,8 +112,22 @@ What it emits:
   renders Mermaid in metadata, so you get a visual graph alongside
   the trace.
 
-Both spans are parented under the current LangChain tool span — the
-trace tree stays connected.
+Span nesting under the LangChain tool span is **not automatic** — the
+Langfuse SDK uses OpenTelemetry context for parent-detection, and that
+context is set by `langfuse.langchain.CallbackHandler`. To get a
+connected trace, register both handlers in the same `callbacks` list:
+
+```python
+from langfuse.langchain import CallbackHandler as LangfuseLangChain
+
+agent.invoke(
+    {"messages": [...]},
+    config={"callbacks": [LangfuseLangChain(), LangfuseHook(client)]},
+)
+```
+
+Without `LangfuseLangChain`, AgentPinBoard's spans land on Langfuse
+but as their own top-level traces.
 
 Constructor options:
 
@@ -123,7 +144,7 @@ ERROR and the surrounding agent run is unaffected.
 Optional dependency. Install with:
 
 ```bash
-uv add 'agent_pinboard[ws]'        # or: pip install agent_pinboard[ws]
+uv add 'agent-pinboard[ws]'        # or: pip install agent-pinboard[ws]
 ```
 
 The handler turns each `agent_pinboard:ingest` event into a stream of
@@ -283,5 +304,17 @@ without losing each other's links.
 A `threading.RLock` per `thread_id` still serializes the
 read-modify-write window inside one process — preventing two threads
 in the same worker from racing on their reload+persist cycle. There is
-no cross-process distributed lock; you don't need one, because the
-storage model is mergeable by construction.
+no cross-process distributed lock; for the **graph** namespaces
+(nodes/edges) you don't need one, because the storage model is
+mergeable by construction.
+
+**Caveat for the `tool_calls` namespace.** `ToolCallRecord`s are
+append-only with timestamp-derived keys; under multi-process
+concurrency two workers can each persist a record for the "same" call
+without de-duplication. `what_have_i_done` and the `tool_log_soft_limit`
+warning will then count both, and `on_duplicate=OnDuplicate.SKIP`
+de-duplication is best-effort across processes (each worker only sees
+its own log fragment until the next `load_tool_calls`). For
+strictly-deduplicated tool logging across workers, treat
+`on_duplicate=ALWAYS` as the safe default and rely on the agent loop
+not re-issuing the same call.

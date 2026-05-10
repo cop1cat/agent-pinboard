@@ -33,13 +33,21 @@ def fact_node_id(node_type: str, canonical_value: str) -> NodeId:
 
 @dataclass(slots=True)
 class FactNode:
-    """A semantic entity in the graph (e.g. a specific IP, user, ARN)."""
+    """A semantic entity in the graph (e.g. a specific IP, user, ARN).
+
+    The provenance fields (``source_events``, ``source_tools``,
+    ``first_seen``, ``last_seen``) are derived from the canonical edges
+    + EventNodes by ``FactGraph.from_snapshot`` when the graph is
+    loaded from the Store. During an in-process ingest they are also
+    mutated by ``FactGraph.upsert_fact`` so that callbacks receiving
+    the in-memory graph see the post-ingest state without having to
+    reload.
+    """
 
     id: NodeId
     node_type: str
     value: str
     canonical_value: str
-    properties: dict[str, Any]
     first_seen: datetime
     last_seen: datetime
     source_events: list[EventId] = field(default_factory=list)

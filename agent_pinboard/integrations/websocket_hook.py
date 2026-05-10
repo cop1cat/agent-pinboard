@@ -2,7 +2,7 @@
 
 Optional dependency. Install with::
 
-    uv add 'agent_pinboard[ws]'        # or:  pip install agent_pinboard[ws]
+    uv add 'agent-pinboard[ws]'        # or:  pip install agent-pinboard[ws]
 
 Designed to drive a live visualisation (e.g. the Cytoscape.js demo in
 ``examples/web/``). The handler itself is just a delta producer with a
@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 
 _DEPENDENCY_HINT = (
     "WebSocketHook + serve_websocket() require the websockets package: "
-    "install with `pip install agent_pinboard[ws]` or `pip install websockets`."
+    "install with `pip install agent-pinboard[ws]` or `pip install websockets`."
 )
 
 

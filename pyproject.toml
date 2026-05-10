@@ -1,13 +1,47 @@
 [project]
 name = "agent-pinboard"
 version = "0.1.0"
+description = "LLM-agent working memory as a session-scoped fact graph: a @pin decorator extracts facts from tool returns, ready-made graph-read tools let the LLM navigate them."
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
+authors = [
+    { name = "Daniel Aspiridonov", email = "chatgpt4fun@proton.me" },
+]
+keywords = [
+    "agent",
+    "llm",
+    "langchain",
+    "langgraph",
+    "memory",
+    "fact-graph",
+    "knowledge-graph",
+    "observability",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
 dependencies = [
     "langchain>=1.2.15",
     "langgraph>=1.1.6",
     "networkx>=3.4",
     "pydantic>=2.13.0",
 ]
+
+[project.urls]
+# TODO before publishing to PyPI: replace OWNER with the real GitHub user/org.
+Homepage = "https://github.com/OWNER/agent-pinboard"
+Documentation = "https://github.com/OWNER/agent-pinboard/tree/main/docs"
+Issues = "https://github.com/OWNER/agent-pinboard/issues"
+Source = "https://github.com/OWNER/agent-pinboard"
 
 [project.optional-dependencies]
 langfuse = [

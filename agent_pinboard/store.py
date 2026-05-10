@@ -110,7 +110,6 @@ def _node_from_dict(d: dict[str, Any]) -> FactNode | EventNode:
         node_type=d["node_type"],
         value=d["value"],
         canonical_value=d["canonical_value"],
-        properties={},
         first_seen=_EPOCH,
         last_seen=_EPOCH,
         source_events=[],

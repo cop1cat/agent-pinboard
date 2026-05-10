@@ -2,8 +2,8 @@
 
 Optional dependency. Install with::
 
-    pip install agent_pinboard[langfuse]
-    # or:  uv add agent_pinboard[langfuse]
+    pip install agent-pinboard[langfuse]
+    # or:  uv add agent-pinboard[langfuse]
 
 Usage::
 
@@ -50,7 +50,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 from agent_pinboard.decorator import INGEST_EVENT
 from agent_pinboard.graph import FactGraph
-from agent_pinboard.models import EVENT_NODE_TYPE, EventNode, FactNode, IngestResult
+from agent_pinboard.models import EVENT_NODE_TYPE, IngestResult
 
 if TYPE_CHECKING:
     from langfuse import Langfuse  # type: ignore[import-not-found]
@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 
 _DEPENDENCY_HINT = (
     "LangfuseHook requires the langfuse package: install with "
-    "`pip install agent_pinboard[langfuse]` or `pip install langfuse`."
+    "`pip install agent-pinboard[langfuse]` or `pip install langfuse`."
 )
 
 
@@ -142,7 +142,7 @@ class LangfuseHook(BaseCallbackHandler):
         ).end()
 
     def _emit_snapshot_span(self, graph: FactGraph) -> None:
-        mermaid = render_mermaid(graph, max_facts=self._max_facts)
+        mermaid = graph.to_mermaid(max_facts=self._max_facts)
         counts = {
             t: len(ids)
             for t, ids in graph.nodes_by_type.items()
@@ -161,64 +161,12 @@ class LangfuseHook(BaseCallbackHandler):
         ).end()
 
 
-# --------------------------------------------------------------------------- #
-# Mermaid renderer — also useful standalone in tests / debug scripts.         #
-# --------------------------------------------------------------------------- #
-
 def render_mermaid(graph: FactGraph, *, max_facts: int = 30) -> str:
-    """Render the current graph as a Mermaid flowchart string.
+    """Backward-compatible alias for ``FactGraph.to_mermaid``.
 
-    Top-`max_facts` facts (by event count) are kept; the rest are summarised
-    as a single ``... (N more)`` node. Events that connect kept facts are
-    rendered; orphan events are omitted.
+    Prefer the method form: ``graph.to_mermaid(max_facts=...)``.
     """
-    facts: list[FactNode] = []
-    for ntype, ids in graph.nodes_by_type.items():
-        if ntype == EVENT_NODE_TYPE:
-            continue
-        for nid in ids:
-            n = graph.get(nid)
-            if isinstance(n, FactNode):
-                facts.append(n)
-    facts.sort(key=lambda f: -len(f.source_events))
-    keep = facts[:max_facts]
-    extra = max(0, len(facts) - len(keep))
-    keep_ids = {f.id for f in keep}
-
-    lines = ["flowchart LR"]
-    seen_event_ids: set[str] = set()
-    for f in keep:
-        lines.append(f'  {_safe(f.id)}["{_label(f)}"]')
-    for f in keep:
-        for ev_id in f.source_events:
-            if ev_id in seen_event_ids:
-                continue
-            ev = graph.get(ev_id)
-            if not isinstance(ev, EventNode):
-                continue
-            edges = graph.edges_for_event(ev_id)
-            connected = [e for e in edges if e.target_id in keep_ids]
-            if len(connected) < 1:
-                continue
-            seen_event_ids.add(ev_id)
-            ev_label = f"{ev.source_tool}@{ev.timestamp.strftime('%H:%M:%S')}"
-            lines.append(f'  {_safe(ev_id)}(("{ev_label}"))')
-            for edge in connected:
-                lines.append(f"  {_safe(ev_id)} --> {_safe(edge.target_id)}")
-    if extra > 0:
-        lines.append(f'  more[/"... and {extra} more facts"/]')
-    return "\n".join(lines)
-
-
-def _label(f: FactNode) -> str:
-    # Mermaid requires escaping double quotes inside labels.
-    val = f.value.replace('"', '\\"')
-    return f"{f.node_type}: {val}"
-
-
-def _safe(node_id: str) -> str:
-    """Mermaid IDs cannot contain dashes etc. — strip to a safe alnum prefix."""
-    return "n" + "".join(c for c in node_id if c.isalnum())[:24]
+    return graph.to_mermaid(max_facts=max_facts)
 
 
 def _summary(result: IngestResult) -> str:

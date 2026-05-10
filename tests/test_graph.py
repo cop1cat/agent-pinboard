@@ -137,6 +137,63 @@ class TestAddEdgeAndQueries:
         assert all(isinstance(f, FactNode) for f in facts)
 
 
+class TestBackfillProvenance:
+    def test_orphan_fact_has_empty_provenance(self) -> None:
+        """A FactNode loaded with no incoming edges has empty provenance.
+        first_seen/last_seen are left as the snapshot supplied them
+        (the Store deserializer seeds them with the EPOCH sentinel for
+        orphans loaded from disk; in-memory orphans keep whatever the
+        constructor set)."""
+        orphan = FactNode(
+            id="x", node_type="IP", value="1.1.1.1",
+            canonical_value="1.1.1.1",
+            first_seen=datetime.now(UTC),
+            last_seen=datetime.now(UTC),
+        )
+        g = FactGraph.from_snapshot([orphan], [])
+        loaded = g.get("x")
+        assert isinstance(loaded, FactNode)
+        assert loaded.source_events == []
+        assert loaded.source_tools == set()
+
+    def test_edge_to_missing_event_is_ignored(self) -> None:
+        """A FactEdge whose event_id is not in the snapshot does not contribute
+        to provenance — defensive against partially-loaded snapshots."""
+        ev = _make_event(eid="e-real")
+        fact = FactNode(
+            id="x", node_type="IP", value="2.2.2.2",
+            canonical_value="2.2.2.2",
+            first_seen=datetime.now(UTC), last_seen=datetime.now(UTC),
+        )
+        real_edge = FactEdge(event_id="e-real", target_id="x",
+                             edge_type="M.f", description="")
+        ghost_edge = FactEdge(event_id="e-missing", target_id="x",
+                              edge_type="M.f", description="")
+        g = FactGraph.from_snapshot([ev, fact], [real_edge, ghost_edge])
+        loaded = g.get("x")
+        assert isinstance(loaded, FactNode)
+        assert loaded.source_events == ["e-real"]
+
+    def test_ordering_deterministic_by_timestamp_then_id(self) -> None:
+        """Two events with the same timestamp tie-break on event_id."""
+        same_ts = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        ev_b = EventNode(id="e-bbb", source_tool="t", timestamp=same_ts)
+        ev_a = EventNode(id="e-aaa", source_tool="t", timestamp=same_ts)
+        fact = FactNode(
+            id="x", node_type="IP", value="3.3.3.3",
+            canonical_value="3.3.3.3",
+            first_seen=datetime.now(UTC), last_seen=datetime.now(UTC),
+        )
+        edges = [
+            FactEdge(event_id=ev_b.id, target_id="x", edge_type="M.f", description=""),
+            FactEdge(event_id=ev_a.id, target_id="x", edge_type="M.f", description=""),
+        ]
+        g = FactGraph.from_snapshot([ev_b, ev_a, fact], edges)
+        loaded = g.get("x")
+        assert isinstance(loaded, FactNode)
+        assert loaded.source_events == ["e-aaa", "e-bbb"]
+
+
 class TestSnapshotRoundtrip:
     def test_roundtrip(self) -> None:
         g = FactGraph()

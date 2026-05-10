@@ -33,6 +33,16 @@ from agent_pinboard.models import (
 logger = logging.getLogger(__name__)
 
 
+def _mermaid_label(f: FactNode) -> str:
+    val = f.value.replace('"', '\\"')
+    return f"{f.node_type}: {val}"
+
+
+def _mermaid_safe(node_id: str) -> str:
+    """Mermaid IDs cannot contain dashes etc. — strip to a safe alnum prefix."""
+    return "n" + "".join(c for c in node_id if c.isalnum())[:24]
+
+
 def _backfill_fact_provenance(
     facts: list[FactNode],
     edges: list[FactEdge],
@@ -150,7 +160,6 @@ class FactGraph:
             node_type=entity.name,
             value=str(value),
             canonical_value=canonical,
-            properties={},
             first_seen=now,
             last_seen=now,
             source_events=[event_id],
@@ -221,6 +230,59 @@ class FactGraph:
     # ------------------------------------------------------------------ #
     # Snapshot / restore — used by Store layer.                          #
     # ------------------------------------------------------------------ #
+
+    # ------------------------------------------------------------------ #
+    # Rendering.                                                         #
+    # ------------------------------------------------------------------ #
+
+    def to_mermaid(self, *, max_facts: int = 30) -> str:
+        """Render the current graph as a Mermaid flowchart string.
+
+        Top-``max_facts`` facts (by event count) are kept; the rest
+        are summarised as a single ``... (N more)`` node. Events that
+        connect at least one kept fact are rendered; orphan events
+        are omitted.
+
+        Useful standalone (debugging, ad-hoc dumps) and as the data
+        source for ``LangfuseHook``'s ``agent_pinboard.graph_snapshot``
+        span.
+        """
+        facts: list[FactNode] = []
+        for ntype, ids in self.nodes_by_type.items():
+            if ntype == EVENT_NODE_TYPE:
+                continue
+            for nid in ids:
+                n = self.get(nid)
+                if isinstance(n, FactNode):
+                    facts.append(n)
+        facts.sort(key=lambda f: -len(f.source_events))
+        keep = facts[:max_facts]
+        extra = max(0, len(facts) - len(keep))
+        keep_ids = {f.id for f in keep}
+
+        lines = ["flowchart LR"]
+        seen_event_ids: set[str] = set()
+        for f in keep:
+            lines.append(f'  {_mermaid_safe(f.id)}["{_mermaid_label(f)}"]')
+        for f in keep:
+            for ev_id in f.source_events:
+                if ev_id in seen_event_ids:
+                    continue
+                ev = self.get(ev_id)
+                if not isinstance(ev, EventNode):
+                    continue
+                edges = self.edges_for_event(ev_id)
+                connected = [e for e in edges if e.target_id in keep_ids]
+                if len(connected) < 1:
+                    continue
+                seen_event_ids.add(ev_id)
+                ev_label = f"{ev.source_tool}@{ev.timestamp.strftime('%H:%M:%S')}"
+                lines.append(f'  {_mermaid_safe(ev_id)}(("{ev_label}"))')
+                for edge in connected:
+                    lines.append(f"  {_mermaid_safe(ev_id)} --> {_mermaid_safe(edge.target_id)}")
+        if extra > 0:
+            lines.append(f'  more[/"... and {extra} more facts"/]')
+        return "\n".join(lines)
 
     @classmethod
     def from_snapshot(

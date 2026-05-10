@@ -7,7 +7,9 @@ invocation, in addition to its normal return:
 2. extracts a delta of ``FactNode`` / ``FactEdge``,
 3. merges the delta into the session graph under a per-thread lock,
 4. records a ``ToolCallRecord``,
-5. fires hooks,
+5. dispatches the ``agent_pinboard:ingest`` custom event into the
+   LangChain callback chain (any registered ``BaseCallbackHandler``
+   receives it via ``on_custom_event``),
 6. optionally rewrites the return via ``response_transform``.
 
 Stack order
@@ -476,8 +478,11 @@ def _dispatch_ingest_event(
     data = _build_ingest_payload(ctx, thread_id, payload, result, graph)
     try:
         dispatch_custom_event(INGEST_EVENT, data)
-    except RuntimeError:
-        # No callback manager in scope — nothing to dispatch to.
+    except (RuntimeError, LookupError):
+        # No callback manager in scope (RuntimeError) or contextvar not
+        # bound (LookupError, varies by langchain-core version) —
+        # nothing to dispatch to. Common in unit tests that drive a
+        # @pin tool's wrapped function without going through invoke.
         pass
     except Exception:  # noqa: BLE001 — observability never breaks ingestion
         logger.error("agent_pinboard:ingest dispatch failed", exc_info=True)
@@ -493,7 +498,7 @@ async def _adispatch_ingest_event(
     data = _build_ingest_payload(ctx, thread_id, payload, result, graph)
     try:
         await adispatch_custom_event(INGEST_EVENT, data)
-    except RuntimeError:
+    except (RuntimeError, LookupError):
         pass
     except Exception:  # noqa: BLE001
         logger.error("agent_pinboard:ingest dispatch failed", exc_info=True)

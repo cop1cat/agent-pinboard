@@ -9,7 +9,7 @@ from __future__ import annotations
 __version__ = "0.1.0"
 
 from agent_pinboard.config import configure
-from agent_pinboard.decorator import pin
+from agent_pinboard.decorator import INGEST_EVENT, pin
 from agent_pinboard.entity import Entity
 from agent_pinboard.enums import Direction, OnDuplicate
 from agent_pinboard.exceptions import (
@@ -36,6 +36,8 @@ __all__ = [
     # Decorator + global config
     "configure",
     "pin",
+    # Observability — custom-event name for BaseCallbackHandler subscribers
+    "INGEST_EVENT",
     # Read tools
     "make_graph_tools",
     # Markers / factories
