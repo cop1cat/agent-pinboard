@@ -484,20 +484,20 @@ AgentPinBoard не поставляет готовых моделей ни по 
 ("agent_pinboard", thread_id, "tool_calls", record_id)       → ToolCallRecord (JSON, один key на запись)
 ```
 
+**Mergeable FactNode storage.** Под ключом `nodes/<id>` для FactNode сериализуется только **иммутабельная подножка** — `id`, `node_type`, `value`, `canonical_value`. Все мутабельные поля (`source_events`, `source_tools`, `first_seen`, `last_seen`) выводятся `FactGraph.from_snapshot` из загруженных рёбер + EventNode'ов. Следствие: два процесса, ингестящие один и тот же канонический факт, пишут байт-в-байт идентичный FactNode-словарь и добавляют разные `FactEdge` с уникальными ID — после reload оба пути provenance сохранены, lost-update невозможен.
+
 **Жизненный цикл в рамках сессии.**
 
-1. При первом обращении из тула AgentPinBoard загружает все ноды и рёбра через `store.search(("agent_pinboard", thread_id))`, строит in-memory `FactGraph` с индексами (`nodes_by_key`, `nodes_by_type`, `edges_by_event`) и кладёт в process-level кеш по `thread_id`.
-2. На каждую ingestion-операцию — из кеша получается текущий граф, добавляются дельты (обычно 1 EventNode + N FactNode + N FactEdge), в Store записываются **только затронутые keys**. Индексы обновляются in-memory.
-3. На каждое чтение (`explore`, `search_nodes`, ...) — из in-memory кеша, O(1) для типовых операций.
-4. Store — source of truth; in-memory кеш — hot-path для runtime.
+1. На каждую `@pin`-операцию: `load_graph` (полная загрузка через `store.search(("agent_pinboard", thread_id, ...))`) → применить дельту в in-memory `FactGraph` → `persist_delta` (запись только затронутых ключей).
+2. На каждый read-tool (`explore`, `search_nodes`, ...): аналогично — `load_graph` → запрос в in-memory графе → результат.
+3. Process-local кэша графа **нет** — это убирает stale-cache между worker'ами и упрощает корректность.
+4. Store — единственный source of truth.
 
 **Session identity.** `thread_id` читается из `runtime.config.configurable.thread_id`. Если не задан — генерируется UUID4, в лог пишется warning (каждый запуск получает свой граф, два одновременных запуска без `thread_id` не смешаются).
 
-**Concurrency.** LangGraph может параллельно звать несколько `@pin`-тулов в одном шаге — без защиты это даст classic lost-update race. AgentPinBoard держит **`anyio.Lock`** per `thread_id` (единый примитив, корректно работающий и в sync, и в async контексте) и захватывает его **только вокруг шага 4 из 6.1** (load graph → apply delta → persist). Вызов тул-функции, валидация, экстракция, логирование, хуки — вне lock'а; параллелизм LangGraph сохраняется, сериализуется только запись в граф. В типовом сценарии шаг 4 — миллисекунды, lock contention минимальный.
+**Concurrency (один процесс).** LangGraph может параллельно звать несколько `@pin`-тулов в одном шаге. Per-`thread_id` `threading.RLock` сериализует read-modify-write окно одного ингеста — `load → apply delta → persist`. Вызов самой тул-функции, валидация, extraction, хуки — вне lock'а; параллелизм LangGraph сохраняется. Lock держится миллисекунды.
 
-Выбор `anyio.Lock`, а не `threading.Lock + asyncio.Lock` по ветвям — потому что в одной сессии могут мешать sync и async тулы, двух разных примитивов для них недостаточно. `anyio` даёт унифицированный лок, совместимый с обоими режимами.
-
-**Multi-process.** In-memory кеш + lock работают только в рамках одного процесса. MVP scope — single-process агент. Multi-worker deployments (uvicorn workers, Celery) — вне Фазы 1.
+**Concurrency (multi-process / multi-worker).** In-process lock не виден соседним процессам, но это и не нужно: благодаря mergeable-storage модели две параллельные транзакции одного thread_id на разделяемом backend (`PostgresStore`, `RedisStore`) не теряют данных. EventNode и FactEdge append-only с уникальными ID, FactNode upsert идемпотентен на уровне иммутабельной подножки, провенанс выводится при reload. Рекомендуемый production-backend — `langgraph.store.postgres.AsyncPostgresStore`.
 
 ### 9.2 Дамп и restore графа
 
@@ -851,7 +851,7 @@ from agent_pinboard.hooks import (
 - Экстрактор: пять правил обхода Pydantic-модели (4.1), отклонение пустого canonical_value, recursion guard через `seen: set[type]`.
 - `FactNode`, `EventNode` (с `node_type="Event"` и `schema_version=1`), `FactEdge`, `FactGraph`, `IngestResult` с автолинковкой и индексами.
 - `@pin` декоратор: sync + async, `many=False/True`, `on_duplicate`, `mask_args`, canonical JSON args_repr, fail-loud при валидации, поддержка dict/BaseModel return.
-- Session identity через `thread_id` (UUID4 fallback), per-session `anyio.Lock` вокруг шага 4.
+- Session identity через `thread_id` (UUID4 fallback), per-session `threading.RLock` вокруг шага 4. Process-local кэша графа нет — каждый ингест/чтение перезагружает граф из Store; cross-process корректность обеспечена mergeable storage (см. §9.1).
 - Sharded хранение в Store (nodes/edges/entities/tool_calls как отдельные keys).
 - Graph-тулы: `explore` (с `Direction`), `timeline`, `graph_summary`, `search_nodes`, `what_have_i_done`.
 - EventNode скрыты по умолчанию в `search_nodes` / `graph_summary`.

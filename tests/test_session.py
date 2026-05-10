@@ -45,11 +45,14 @@ class TestThreadIdResolution:
         assert tid1 != tid2
 
 
-class TestSessionCacheAndLoad:
-    def test_load_then_cached(self, store: InMemoryStore) -> None:
+class TestSessionLoad:
+    def test_each_call_returns_fresh_graph(self, store: InMemoryStore) -> None:
+        # No process-local cache: every call reloads from the Store, so a
+        # second worker can never serve stale data after another worker
+        # persisted a delta.
         g1 = get_or_load_session(store, "tid")
         g2 = get_or_load_session(store, "tid")
-        assert g1 is g2  # same in-memory object cached
+        assert g1 is not g2
 
     def test_load_picks_up_persisted_state(self, store: InMemoryStore) -> None:
         ev = EventNode(id="e", source_tool="t", timestamp=datetime.now(UTC))
@@ -66,7 +69,6 @@ class TestSessionCacheAndLoad:
 
         ga = get_or_load_session(store, "alpha")
         gb = get_or_load_session(store, "beta")
-        assert ga is not gb
         assert ga.get("ea") is not None and ga.get("eb") is None
         assert gb.get("eb") is not None and gb.get("ea") is None
 
@@ -82,7 +84,6 @@ class TestLockBehaviour:
 
     def test_concurrent_writes_do_not_lose_updates(self, store: InMemoryStore) -> None:
         """README §16 AC4 — N parallel ingest steps → all N writes survive."""
-        g = get_or_load_session(store, "tid")
         IP = Entity(name="IP", description="ip")
         N = 10
         barrier = threading.Barrier(N)
@@ -91,8 +92,13 @@ class TestLockBehaviour:
         def worker(i: int) -> None:
             try:
                 barrier.wait(timeout=2)
+                # Each worker drives a full reload→mutate→persist cycle
+                # under the per-thread lock — exactly what @pin does.
                 with lock_for("tid"):
-                    g.upsert_fact(IP, f"10.0.0.{i}", f"e-{i}", f"tool-{i}")
+                    g = get_or_load_session(store, "tid")
+                    nid, _ = g.upsert_fact(IP, f"10.0.0.{i}", f"e-{i}", f"tool-{i}")
+                    fact = g.get(nid)
+                    store_io.persist_delta(store, "tid", [fact], [])
             except BaseException as e:  # noqa: BLE001
                 errors.append(e)
 
@@ -102,12 +108,14 @@ class TestLockBehaviour:
         for t in threads:
             t.join()
         assert errors == []
-        assert len(list(g.all_facts())) == N
+        # Reload from Store to verify durability across workers.
+        final = get_or_load_session(store, "tid")
+        assert len(list(final.all_facts())) == N
 
 
 class TestAsyncSession:
     @pytest.mark.asyncio
-    async def test_aget_or_load_caches(self, store: InMemoryStore) -> None:
+    async def test_aget_or_load_returns_fresh_graph(self, store: InMemoryStore) -> None:
         g1 = await aget_or_load_session(store, "tid")
         g2 = await aget_or_load_session(store, "tid")
-        assert g1 is g2
+        assert g1 is not g2

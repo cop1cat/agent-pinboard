@@ -13,7 +13,7 @@ the touched keys (delta), never the whole graph as a blob.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from agent_pinboard.entity import Entity
@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 # to exceed this; if they do, README §16 reaches "out of scope (sharded
 # pagination — Phase 3)".
 _SCAN_LIMIT = 10_000
+
+# Sentinel timestamp for FactNodes loaded before from_snapshot backfill.
+_EPOCH = datetime.fromtimestamp(0, tz=UTC)
 
 
 # --------------------------------------------------------------------------- #
@@ -78,17 +81,16 @@ def _node_to_dict(n: FactNode | EventNode) -> dict[str, Any]:
             "timestamp": n.timestamp.isoformat(),
             "properties": n.properties,
         }
+    # Persist only the immutable subset. Mutable fields (source_events,
+    # source_tools, first_seen, last_seen) are derived from edges + events
+    # at load time, so two concurrent processes upserting the same
+    # canonical fact never lose each other's links.
     return {
         "kind": "fact",
         "id": n.id,
         "node_type": n.node_type,
         "value": n.value,
         "canonical_value": n.canonical_value,
-        "properties": n.properties,
-        "first_seen": n.first_seen.isoformat(),
-        "last_seen": n.last_seen.isoformat(),
-        "source_events": list(n.source_events),
-        "source_tools": sorted(n.source_tools),
     }
 
 
@@ -101,16 +103,18 @@ def _node_from_dict(d: dict[str, Any]) -> FactNode | EventNode:
             timestamp=datetime.fromisoformat(d["timestamp"]),
             properties=dict(d.get("properties") or {}),
         )
+    # Mutable fields seeded with empty defaults — FactGraph.from_snapshot
+    # backfills them from the loaded edges + EventNodes.
     return FactNode(
         id=d["id"],
         node_type=d["node_type"],
         value=d["value"],
         canonical_value=d["canonical_value"],
-        properties=dict(d.get("properties") or {}),
-        first_seen=datetime.fromisoformat(d["first_seen"]),
-        last_seen=datetime.fromisoformat(d["last_seen"]),
-        source_events=list(d.get("source_events") or []),
-        source_tools=set(d.get("source_tools") or ()),
+        properties={},
+        first_seen=_EPOCH,
+        last_seen=_EPOCH,
+        source_events=[],
+        source_tools=set(),
     )
 
 

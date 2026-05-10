@@ -232,3 +232,45 @@ rotating secret will look identical to a previous secret in the log,
 so two calls with different real keys are dedup-equivalent. If you
 rotate keys mid-session, either pass them through `runtime.config`
 instead or use `on_duplicate=OnDuplicate.ALWAYS`.
+
+## Multi-process / production storage
+
+`InMemoryStore` is fine for tests and single-process demos, but it
+loses everything when the process exits and cannot be shared across
+workers. For production, use a shared backend — LangGraph ships an
+async PostgreSQL store that AgentPinBoard works against without any
+extra plumbing:
+
+```python
+from langgraph.store.postgres import AsyncPostgresStore
+from langchain.agents import create_agent
+
+async with AsyncPostgresStore.from_conn_string(
+    "postgresql://user:pass@host:5432/db"
+) as store:
+    await store.setup()  # creates the tables once
+
+    agent = create_agent(
+        model=llm,
+        tools=[*my_tools, *make_graph_tools()],
+        store=store,
+    )
+    result = await agent.ainvoke(
+        {"messages": [...]},
+        config={"configurable": {"thread_id": "session-42"}},
+    )
+```
+
+AgentPinBoard does **not** keep a process-local cache of the graph —
+every `@pin` ingest and every read tool call performs a fresh
+`load_graph` from the Store. Combined with the mergeable `FactNode`
+storage (only the immutable subset is persisted; provenance is derived
+from edges + EventNodes at load time), this means two workers on
+different processes can ingest into the same `thread_id` concurrently
+without losing each other's links.
+
+A `threading.RLock` per `thread_id` still serializes the
+read-modify-write window inside one process — preventing two threads
+in the same worker from racing on their reload+persist cycle. There is
+no cross-process distributed lock; you don't need one, because the
+storage model is mergeable by construction.

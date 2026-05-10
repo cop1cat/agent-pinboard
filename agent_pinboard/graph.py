@@ -33,6 +33,41 @@ from agent_pinboard.models import (
 logger = logging.getLogger(__name__)
 
 
+def _backfill_fact_provenance(
+    facts: list[FactNode],
+    edges: list[FactEdge],
+    events_by_id: dict[EventId, EventNode],
+) -> None:
+    """Recompute mutable FactNode fields (source_events / source_tools / first_seen / last_seen)
+    from the canonical edge + event records loaded from the Store.
+
+    Order of source_events follows event timestamp (then event_id for stability),
+    so two processes loading the same Store see the same list.
+    """
+    edges_by_target: dict[NodeId, list[FactEdge]] = {}
+    for e in edges:
+        edges_by_target.setdefault(e.target_id, []).append(e)
+
+    for fact in facts:
+        incoming = edges_by_target.get(fact.id, [])
+        # Distinct event ids; deterministic order (timestamp, then id).
+        seen_ev: set[EventId] = set()
+        events: list[EventNode] = []
+        for edge in incoming:
+            ev = events_by_id.get(edge.event_id)
+            if ev is None or ev.id in seen_ev:
+                continue
+            seen_ev.add(ev.id)
+            events.append(ev)
+        events.sort(key=lambda e: (e.timestamp, e.id))
+
+        fact.source_events = [e.id for e in events]
+        fact.source_tools = {e.source_tool for e in events}
+        if events:
+            fact.first_seen = events[0].timestamp
+            fact.last_seen = events[-1].timestamp
+
+
 class FactGraph:
     """In-memory graph + sidecar indices.
 
@@ -193,18 +228,32 @@ class FactGraph:
         nodes: Iterable[FactNode | EventNode],
         edges: Iterable[FactEdge],
     ) -> FactGraph:
-        """Rebuild a FactGraph (and its sidecars) from a flat snapshot."""
+        """Rebuild a FactGraph (and its sidecars) from a flat snapshot.
+
+        FactNodes are persisted as their immutable subset only
+        (id / type / value / canonical_value). The mutable fields
+        (``source_events``, ``source_tools``, ``first_seen``, ``last_seen``)
+        are derived here by walking the loaded edges and EventNodes, so
+        two processes upserting the same canonical fact never lose each
+        other's links.
+        """
         g = cls()
+        events_by_id: dict[EventId, EventNode] = {}
+        facts: list[FactNode] = []
         for n in nodes:
             if isinstance(n, EventNode):
                 g.g.add_node(n.id, kind="event", obj=n)
                 g.nodes_by_type.setdefault(EVENT_NODE_TYPE, set()).add(n.id)
+                events_by_id[n.id] = n
             else:
                 g.g.add_node(n.id, kind="fact", obj=n)
                 g.nodes_by_key[(n.node_type, n.canonical_value)] = n.id
                 g.nodes_by_type.setdefault(n.node_type, set()).add(n.id)
-        for e in edges:
+                facts.append(n)
+        edge_list = list(edges)
+        for e in edge_list:
             g.g.add_edge(e.event_id, e.target_id, key=e.id, obj=e)
+        _backfill_fact_provenance(facts, edge_list, events_by_id)
         return g
 
     # ------------------------------------------------------------------ #
@@ -219,7 +268,7 @@ class FactGraph:
         can detect older dumps.
         """
         # Local import avoids a top-level circular dependency.
-        from agent_pinboard import __version__ as _agent_agent_pinboard_version
+        from agent_pinboard import __version__ as _agent_pinboard_version
         from agent_pinboard import store as store_io
 
         nodes_payload: list[dict[str, Any]] = []
@@ -232,7 +281,7 @@ class FactGraph:
             if isinstance(edge, FactEdge):
                 edges_payload.append(store_io._edge_to_dict(edge))
         return {
-            "agent_pinboard_version": _agent_agent_pinboard_version,
+            "agent_pinboard_version": _agent_pinboard_version,
             "schema": "agent_pinboard.factgraph",
             "nodes": nodes_payload,
             "edges": edges_payload,

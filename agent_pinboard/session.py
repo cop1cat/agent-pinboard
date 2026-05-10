@@ -1,17 +1,20 @@
-"""Per-session FactGraph cache and concurrency lock.
+"""Per-session lock + thread_id resolution.
 
-The graph is loaded from the Store once per session and kept in process
-memory thereafter. The lock protects the read-modify-write block of
-``@pin`` (step 4 in README §6.1) so parallel ingestion does not lose
-updates.
+The session graph is **not** cached in process memory. Every ``@pin``
+ingest and every read tool loads the graph fresh from the Store, so a
+multi-process deployment (gunicorn / Celery / Ray workers sharing a
+PostgresStore) sees consistent state without invalidation logic.
 
-Concurrency primitive
----------------------
-README originally promised ``anyio.Lock``. In practice ``anyio.Lock`` is
-async-only and refuses sync ``with`` use, so we use ``threading.Lock``,
-which is safe in both contexts: in async code its acquire/release is a
-microsecond-level CPU operation around the in-memory delta-merge, so
-the brief event-loop block is acceptable.
+The only in-process state is a per-``thread_id`` ``threading.RLock``
+that serializes the read-modify-write window of a single ingest within
+one process — preventing two threads in the same worker from racing on
+their reload+persist cycle. Cross-process correctness comes from the
+mergeable data model: stored ``FactNode`` keys carry only the immutable
+subset (``id``, ``node_type``, ``value``, ``canonical_value``); the
+mutable provenance fields (``source_events``, ``source_tools``,
+``first_seen``, ``last_seen``) are derived from the canonical edges +
+EventNodes at load time, so two processes upserting the same canonical
+fact never lose each other's links.
 
 Thread-id resolution
 --------------------
@@ -22,7 +25,6 @@ on a shared default key.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 import uuid
@@ -39,19 +41,16 @@ logger = logging.getLogger(__name__)
 
 
 # Process-global state. Reset between tests via :func:`_reset`.
-_session_graphs: dict[str, FactGraph] = {}
 _session_locks: dict[str, threading.RLock] = {}
-_async_load_locks: dict[str, asyncio.Lock] = {}
 _registry_lock = threading.Lock()
 
 
 def lock_for(thread_id: str) -> threading.RLock:
     """Return the per-session reentrant lock, creating it on first use.
 
-    Re-entrancy matters because ``@pin`` holds the lock for the
-    read-modify-write block and may call ``get_or_load_session`` from
-    inside that block (the latter also acquires the lock for its own
-    double-checked load).
+    Reentrant because ``@pin`` holds the lock for the read-modify-write
+    block and the read tools may re-enter via ``get_or_load_session``
+    while the same thread already holds it.
     """
     with _registry_lock:
         lock = _session_locks.get(thread_id)
@@ -62,49 +61,17 @@ def lock_for(thread_id: str) -> threading.RLock:
 
 
 def get_or_load_session(store: BaseStore, thread_id: str) -> FactGraph:
-    """Return the cached FactGraph, loading it from Store on first access."""
-    cached = _session_graphs.get(thread_id)
-    if cached is not None:
-        return cached
-    with lock_for(thread_id):
-        cached = _session_graphs.get(thread_id)
-        if cached is None:
-            cached = store_io.load_graph(store, thread_id)
-            _session_graphs[thread_id] = cached
-    return cached
+    """Always load the session graph fresh from the Store.
+
+    The name is preserved for backward-compat with internal callers; in
+    practice this is now a thin wrapper around ``store_io.load_graph``.
+    """
+    return store_io.load_graph(store, thread_id)
 
 
 async def aget_or_load_session(store: BaseStore, thread_id: str) -> FactGraph:
-    """Async variant — uses the async store API for the initial load.
-
-    Uses an ``asyncio.Lock`` to serialize concurrent loads for the same
-    ``thread_id``, so two parallel awaiters do not both call the store and
-    then race to install their copy.
-    """
-    cached = _session_graphs.get(thread_id)
-    if cached is not None:
-        return cached
-    async with _async_lock_for(thread_id):
-        cached = _session_graphs.get(thread_id)
-        if cached is not None:
-            return cached
-        g = await store_io.aload_graph(store, thread_id)
-        _session_graphs[thread_id] = g
-        return g
-
-
-def _async_lock_for(thread_id: str) -> asyncio.Lock:
-    """Per-session asyncio.Lock; created lazily under the registry mutex.
-
-    Lives only as long as the asyncio event loop that created it; created
-    on demand inside ``aget_or_load_session``.
-    """
-    with _registry_lock:
-        lock = _async_load_locks.get(thread_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            _async_load_locks[thread_id] = lock
-        return lock
+    """Async variant — uses the async store API for the load."""
+    return await store_io.aload_graph(store, thread_id)
 
 
 def thread_id_from(runtime: ToolRuntime) -> str:
@@ -133,6 +100,4 @@ def thread_id_from(runtime: ToolRuntime) -> str:
 
 def _reset() -> None:
     """Wipe all per-session state. Test-only."""
-    _session_graphs.clear()
     _session_locks.clear()
-    _async_load_locks.clear()

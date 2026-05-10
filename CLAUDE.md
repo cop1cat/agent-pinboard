@@ -62,13 +62,13 @@ AgentPinBoard is a Python library for LLM-agent working memory as a fact graph s
 
 Graph lives in LangGraph `Store` under namespace `("agent_pinboard", thread_id, ...)` split across:
 
-- `nodes/<id>` — one key per `FactNode` / `EventNode`
+- `nodes/<id>` — one key per `FactNode` / `EventNode`. Stored `FactNode` carries only the **immutable subset** (`id`, `node_type`, `value`, `canonical_value`); `source_events` / `source_tools` / `first_seen` / `last_seen` are derived from the loaded edges + EventNodes by `FactGraph.from_snapshot`.
 - `edges/<id>` — one key per `FactEdge`
 - `entities` — the session entity registry (single blob)
 - `tool_calls/<id>` — one key per `ToolCallRecord`
 - `raw_events/<event_id>` — only when `@pin(store_raw=True)`
 
-In-process cache per `thread_id`. `threading.RLock` (reentrant — `@pin` and `get_or_load_session` both acquire it) protects only the ingestion read-modify-write block (step 4 of the `@pin` flow), not the whole tool body, so LangGraph's parallel tool execution is preserved. Async loads use a separate `asyncio.Lock` per `thread_id` to avoid TOCTOU between concurrent awaiters. `thread_id` comes from `runtime.config.configurable.thread_id`; absent → fresh UUID4 with a warning (parallel anonymous calls never silently merge).
+**No process-local graph cache.** Every `@pin` ingest and every read tool call performs a fresh `load_graph` from the Store, so a multi-process deployment (gunicorn / Celery workers sharing a `PostgresStore`) sees consistent state without invalidation logic. `threading.RLock` per `thread_id` still serializes the read-modify-write window of one ingest **within** one process, but cross-process correctness comes from the mergeable storage model: two workers that upsert the same canonical fact write byte-identical FactNode dicts and append distinct edges, so the post-reload provenance contains both workers' links. `thread_id` comes from `runtime.config.configurable.thread_id`; absent → fresh UUID4 with a warning (parallel anonymous calls never silently merge).
 
 **Topology:**
 
@@ -104,7 +104,7 @@ If a change "while you're here" tries to add any of these, surface it as a real 
 - `extract.py` — 5 extraction rules via `match`
 - `decorator.py` — `@pin` pipeline (sync + async wrappers share pure helpers; sync/async paths differ only in the I/O calls)
 - `store.py` — sharded sync + async I/O over LangGraph `BaseStore`
-- `session.py` — per-session cache, `RLock`, `asyncio.Lock` for async loads, `thread_id_from(runtime)`
+- `session.py` — per-`thread_id` `RLock` + `thread_id_from(runtime)` (no graph cache; every load goes through `store.py::load_graph`)
 - `tools.py` — seven graph tools (`make_graph_tools`)
 - `hooks.py`, `config.py`, `registry.py` — supporting machinery
 - `integrations/langfuse_hook.py` — `LangfuseHook` + `render_mermaid` (optional `agent_pinboard[langfuse]`)
@@ -132,7 +132,7 @@ If a change "while you're here" tries to add any of these, surface it as a real 
 - `@dataclass(slots=True)` on all graph models; `frozen=True` where immutability matters (`Entity`, `FactEdge`, `ToolCallRecord`).
 - `@override` from `typing` on hook subclasses (README §11.1) — typechecker catches typos in overridden method names.
 - `match`-statement is the implementation of the 5 extraction rules (`agent_pinboard/extract.py::_walk`). Adding a rule = adding a `case`, not amending an `if` chain.
-- Per-session locks are `threading.RLock` (sync, reentrant) + `asyncio.Lock` (async loads). The spec originally said `anyio.Lock` but that doesn't work synchronously; the deviation is documented inline in `agent_pinboard/session.py`.
+- Per-session lock is `threading.RLock` (reentrant) — sync, but acquired in async paths too (the held window is microseconds around the in-memory delta merge, no awaits inside). The spec originally said `anyio.Lock` but that doesn't work synchronously; the deviation is documented inline in `agent_pinboard/session.py`.
 - Hook callbacks are wrapped in `try/except` by `agent_pinboard.hooks.fire`; a hook that raises **never breaks ingestion**, the failure is logged at ERROR. Preserve this contract when adding new hooks or hook implementations.
 - Process-global state lives in `agent_pinboard/{registry,session,config}.py`. Each module exposes a `_reset()` function used by the autouse `reset_agent_pinboard_state` fixture in `tests/conftest.py`. **New modules with process-global state must expose `_reset()` and register it in that fixture.**
 - Sync ↔ async parity: every async public function should mirror its sync counterpart (`load_graph` / `aload_graph`, `persist_delta` / `apersist_delta`, etc.). Decorator wraps both in the same `@pin` based on whether the underlying tool is sync or async (detected via `asyncio.iscoroutinefunction`).

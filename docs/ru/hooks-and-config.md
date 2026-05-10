@@ -233,3 +233,44 @@ def vt_lookup(value: str, api_key: str, runtime: ToolRuntime) -> dict:
 dedup-эквивалентными. Если ротируете ключи внутри сессии — либо
 передавайте через `runtime.config` (не через args), либо ставьте
 `on_duplicate=OnDuplicate.ALWAYS`.
+
+## Multi-process / production storage
+
+`InMemoryStore` подходит для тестов и однопроцессных демо, но он
+теряет всё при выходе из процесса и не разделяется между воркерами.
+В продакшене используйте shared backend — LangGraph поставляет async
+PostgreSQL store, с которым AgentPinBoard работает без дополнительной
+обвязки:
+
+```python
+from langgraph.store.postgres import AsyncPostgresStore
+from langchain.agents import create_agent
+
+async with AsyncPostgresStore.from_conn_string(
+    "postgresql://user:pass@host:5432/db"
+) as store:
+    await store.setup()  # один раз создаёт таблицы
+
+    agent = create_agent(
+        model=llm,
+        tools=[*my_tools, *make_graph_tools()],
+        store=store,
+    )
+    result = await agent.ainvoke(
+        {"messages": [...]},
+        config={"configurable": {"thread_id": "session-42"}},
+    )
+```
+
+AgentPinBoard **не** держит process-local кэш графа — каждый ингест
+через `@pin` и каждый read-tool делают свежий `load_graph` из Store.
+В сочетании с mergeable-сериализацией `FactNode` (на диске лежит
+только иммутабельная подножка; провенанс выводится из рёбер + EventNode
+при загрузке) это значит, что два воркера на разных процессах могут
+параллельно ингестить в один `thread_id` без потери ссылок друг друга.
+
+Per-`thread_id` `threading.RLock` всё ещё сериализует
+read-modify-write окно ингеста внутри одного процесса — чтобы два
+потока одного воркера не гонялись на своём reload+persist цикле.
+Cross-process distributed lock не нужен: storage-модель mergeable
+by construction.
