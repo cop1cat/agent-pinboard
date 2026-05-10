@@ -37,11 +37,10 @@ dependencies = [
 ]
 
 [project.urls]
-# TODO before publishing to PyPI: replace OWNER with the real GitHub user/org.
-Homepage = "https://github.com/OWNER/agent-pinboard"
-Documentation = "https://github.com/OWNER/agent-pinboard/tree/main/docs"
-Issues = "https://github.com/OWNER/agent-pinboard/issues"
-Source = "https://github.com/OWNER/agent-pinboard"
+Homepage = "https://github.com/cop1cat/agent-pinboard"
+Documentation = "https://github.com/cop1cat/agent-pinboard/tree/main/docs"
+Issues = "https://github.com/cop1cat/agent-pinboard/issues"
+Source = "https://github.com/cop1cat/agent-pinboard"
 
 [project.optional-dependencies]
 langfuse = [
