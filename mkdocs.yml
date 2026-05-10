@@ -1,0 +1,111 @@
+site_name: AgentPinBoard
+site_description: LLM-agent working memory as a session-scoped fact graph.
+site_url: https://cop1cat.github.io/agent-pinboard/
+repo_url: https://github.com/cop1cat/agent-pinboard
+repo_name: cop1cat/agent-pinboard
+docs_dir: docs
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra:
+  version:
+    provider: mike
+    default: latest
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+plugins:
+  - search
+  # mkdocstrings is configured but not yet used — the api-reference.md
+  # pages are hand-written. Add `::: agent_pinboard.<symbol>` blocks
+  # there if you want auto-generated reference sections.
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+  - i18n:
+      docs_structure: folder
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+          nav:
+            - Home: index.md
+            - Quickstart: quickstart.md
+            - Concepts: concepts.md
+            - Extraction rules: extraction-rules.md
+            - Graph tools: graph-tools.md
+            - Hooks & config: hooks-and-config.md
+            - Pitfalls: pitfalls.md
+            - Examples: examples.md
+            - API reference: api-reference.md
+        - locale: ru
+          name: Русский
+          build: true
+          nav:
+            - Главная: index.md
+            - Быстрый старт: quickstart.md
+            - Концепции: concepts.md
+            - Правила экстракции: extraction-rules.md
+            - Graph-тулы: graph-tools.md
+            - Хуки и конфиг: hooks-and-config.md
+            - Подводные камни: pitfalls.md
+            - Примеры: examples.md
+            - API: api-reference.md
