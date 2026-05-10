@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
 
-from pinboard import Entity, EventNode, FactEdge, FactGraph, IngestResult
-
+from agent_pinboard import Entity, EventNode, FactEdge, FactGraph, IngestResult
 
 pytest.importorskip("langfuse")
 
 
-from pinboard.integrations.langfuse_hook import LangfuseHook, render_mermaid
+from agent_pinboard.integrations.langfuse_hook import LangfuseHook, render_mermaid
 
 
 def _add(g: FactGraph, ent: Entity, value: str, ev_id: str, tool: str, edge_type: str) -> None:
@@ -26,7 +25,7 @@ def graph() -> FactGraph:
     g = FactGraph()
     IP = Entity(name="IP", description="ip")
     User = Entity(name="User", description="u")
-    ev = EventNode(id="e-1", source_tool="fetch", timestamp=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
+    ev = EventNode(id="e-1", source_tool="fetch", timestamp=datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC))
     g.add_event(ev)
     _add(g, IP, "1.1.1.1", ev.id, "fetch", "Event.src_ip")
     _add(g, User, "alice", ev.id, "fetch", "Event.actor")
@@ -46,7 +45,7 @@ class TestMermaidRendering:
 
     def test_truncation_with_extra_marker(self, graph: FactGraph) -> None:
         IP = Entity(name="IP", description="ip")
-        ev = EventNode(id="e-2", source_tool="vt", timestamp=datetime(2026, 1, 1, 12, 1, 0, tzinfo=timezone.utc))
+        ev = EventNode(id="e-2", source_tool="vt", timestamp=datetime(2026, 1, 1, 12, 1, 0, tzinfo=UTC))
         graph.add_event(ev)
         for i in range(40):
             _add(graph, IP, f"10.0.0.{i}", ev.id, "vt", "Event.related_ip")
@@ -57,7 +56,7 @@ class TestMermaidRendering:
         # Add an event with NO facts attached.
         graph.add_event(EventNode(
             id="e-orphan", source_tool="lonely",
-            timestamp=datetime(2026, 1, 1, 12, 5, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 1, 1, 12, 5, 0, tzinfo=UTC),
         ))
         out = render_mermaid(graph)
         assert "lonely@" not in out
@@ -65,7 +64,7 @@ class TestMermaidRendering:
     def test_quotes_escaped(self) -> None:
         g = FactGraph()
         IP = Entity(name="IP", description="ip")
-        ev = EventNode(id="e", source_tool="t", timestamp=datetime.now(timezone.utc))
+        ev = EventNode(id="e", source_tool="t", timestamp=datetime.now(UTC))
         g.add_event(ev)
         _add(g, IP, 'with "quote"', ev.id, "t", "Event.x")
         out = render_mermaid(g)
@@ -83,7 +82,7 @@ class TestLangfuseHookEmits:
 
         assert client.start_observation.called
         kwargs = client.start_observation.call_args.kwargs
-        assert kwargs["name"] == "pinboard.ingest"
+        assert kwargs["name"] == "agent_pinboard.ingest"
         assert kwargs["output"]["new_nodes"] == 2
         assert kwargs["metadata"]["event_ids"] == ["e-1"]
 
@@ -98,7 +97,7 @@ class TestLangfuseHookEmits:
         # but on_graph_changed alone only emits the snapshot.
         assert client.start_observation.called
         kwargs = client.start_observation.call_args.kwargs
-        assert kwargs["name"] == "pinboard.graph_snapshot"
+        assert kwargs["name"] == "agent_pinboard.graph_snapshot"
         assert "mermaid" in kwargs["metadata"]
         assert kwargs["metadata"]["mermaid"].startswith("flowchart LR")
 

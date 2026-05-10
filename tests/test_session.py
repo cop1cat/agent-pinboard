@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 from langgraph.store.memory import InMemoryStore
 
-from pinboard import Entity, EventNode
-from pinboard import store as store_io
-from pinboard.session import (
+from agent_pinboard import Entity, EventNode
+from agent_pinboard import store as store_io
+from agent_pinboard.session import (
     aget_or_load_session,
     get_or_load_session,
     lock_for,
@@ -52,15 +52,15 @@ class TestSessionCacheAndLoad:
         assert g1 is g2  # same in-memory object cached
 
     def test_load_picks_up_persisted_state(self, store: InMemoryStore) -> None:
-        ev = EventNode(id="e", source_tool="t", timestamp=datetime.now(timezone.utc))
+        ev = EventNode(id="e", source_tool="t", timestamp=datetime.now(UTC))
         store_io.persist_delta(store, "tid", [ev], [])
         g = get_or_load_session(store, "tid")
         assert g.get("e") is not None
 
     def test_session_isolation(self, store: InMemoryStore) -> None:
         """README §16 AC7 — different thread_ids never share data."""
-        ev_a = EventNode(id="ea", source_tool="t", timestamp=datetime.now(timezone.utc))
-        ev_b = EventNode(id="eb", source_tool="t", timestamp=datetime.now(timezone.utc))
+        ev_a = EventNode(id="ea", source_tool="t", timestamp=datetime.now(UTC))
+        ev_b = EventNode(id="eb", source_tool="t", timestamp=datetime.now(UTC))
         store_io.persist_delta(store, "alpha", [ev_a], [])
         store_io.persist_delta(store, "beta", [ev_b], [])
 

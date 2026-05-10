@@ -2,17 +2,17 @@
 
 ## Hooks
 
-`PinBoardHooks` is a plain class — subclass and override only the
+`AgentPinBoardHooks` is a plain class — subclass and override only the
 methods you care about. Every callback is wrapped in `try/except`:
 **a hook that raises never breaks ingestion**, the failure is logged
 at ERROR level and ingestion continues.
 
 ```python
 from typing import override
-from pinboard import PinBoardHooks
-from pinboard.models import EventId, FactNode, IngestResult
+from agent_pinboard import AgentPinBoardHooks
+from agent_pinboard.models import EventId, FactNode, IngestResult
 
-class MyHook(PinBoardHooks):
+class MyHook(AgentPinBoardHooks):
     @override
     def on_node_added(self, node) -> None:
         print(f"new node: {node.node_type}")
@@ -36,13 +36,13 @@ typos in the method names you're overriding.
 | `on_node_added(node)` | Any new `FactNode` or `EventNode` is created |
 | `on_edge_added(edge)` | Any new `FactEdge` is created |
 | `on_link_found(existing, event_id)` | An existing `FactNode` is re-linked from a new event (one call per distinct linked fact per ingest) |
-| `on_ingest_complete(result)` | One `@fact` invocation finished successfully |
+| `on_ingest_complete(result)` | One `@pin` invocation finished successfully |
 | `on_graph_changed()` | Coarse "the graph mutated" signal, fires once per ingest |
 
 ### Built-in implementations
 
 ```python
-from pinboard import LoggingHook, CompositeHook
+from agent_pinboard import LoggingHook, CompositeHook
 import logging
 
 # Logs every callback at INFO.
@@ -60,29 +60,29 @@ below for both.
 Optional dependency. Install with:
 
 ```bash
-uv add 'pinboard[langfuse]'        # or: pip install pinboard[langfuse]
+uv add 'agent_pinboard[langfuse]'        # or: pip install agent_pinboard[langfuse]
 ```
 
 Then:
 
 ```python
 from langfuse import Langfuse
-from pinboard.integrations.langfuse_hook import LangfuseHook
+from agent_pinboard.integrations.langfuse_hook import LangfuseHook
 
 client = Langfuse(public_key=..., secret_key=..., host=...)
 hooks = LangfuseHook(client)
 
-@fact(model=CloudTrailEvent, many=True, hooks=hooks)
+@pin(model=CloudTrailEvent, many=True, hooks=hooks)
 @tool
 def fetch_cloudtrail(...): ...
 ```
 
 What it emits:
 
-* On every `on_ingest_complete` — a Langfuse span `pinboard.ingest`
+* On every `on_ingest_complete` — a Langfuse span `agent_pinboard.ingest`
   with the per-call delta (`new_nodes`, `linked_nodes`, `new_edges`,
   warnings).
-* On every `on_graph_changed` — a span `pinboard.graph_snapshot`
+* On every `on_graph_changed` — a span `agent_pinboard.graph_snapshot`
   whose metadata carries a Mermaid flowchart of the current top facts
   and the events connecting them. Langfuse renders Mermaid in
   metadata, giving you a visual graph alongside the trace.
@@ -95,14 +95,14 @@ Constructor options:
   want ingest spans (cheaper, less Langfuse traffic).
 
 The hook never raises — failures are logged at ERROR (the
-`PinBoardHooks` log-and-continue contract is preserved).
+`AgentPinBoardHooks` log-and-continue contract is preserved).
 
 ### `WebSocketHook`
 
 Optional dependency. Install with:
 
 ```bash
-uv add 'pinboard[ws]'        # or: pip install pinboard[ws]
+uv add 'agent_pinboard[ws]'        # or: pip install agent_pinboard[ws]
 ```
 
 The hook collects every graph-change event into a thread-safe queue;
@@ -112,14 +112,14 @@ connected client.
 
 ```python
 import asyncio
-from pinboard import fact, make_graph_tools
-from pinboard.integrations.websocket_hook import (
+from agent_pinboard import pin, make_graph_tools
+from agent_pinboard.integrations.websocket_hook import (
     WebSocketHook, serve_websocket,
 )
 
 hook = WebSocketHook(thread_id_label="investigation-001")
 
-@fact(model=CloudTrailEvent, many=True, hooks=hook)
+@pin(model=CloudTrailEvent, many=True, hooks=hook)
 @tool
 def fetch_cloudtrail(...): ...
 
@@ -136,7 +136,7 @@ Wire format (JSON, one message per line):
 * `snapshot` — full graph dump on connect.
 * `node_added` / `edge_added` — incremental changes.
 * `link_found` — an existing fact was re-linked from a new event.
-* `ingest_complete` — a `@fact` invocation finished successfully.
+* `ingest_complete` — a `@pin` invocation finished successfully.
 
 A ready-to-use Cytoscape.js frontend lives at
 `examples/web/index.html` and the demo runner at
@@ -148,13 +148,13 @@ logged and swallowed.
 
 ### Wiring hooks into a tool
 
-Pass the hook to `@fact` (per-tool) and to `make_graph_tools` (for the
+Pass the hook to `@pin` (per-tool) and to `make_graph_tools` (for the
 read tools, where they currently no-op):
 
 ```python
 hooks = MyHook()
 
-@fact(model=CloudTrailEvent, many=True, hooks=hooks)
+@pin(model=CloudTrailEvent, many=True, hooks=hooks)
 @tool
 def fetch_cloudtrail(...): ...
 
@@ -164,7 +164,7 @@ agent_tools = [fetch_cloudtrail, *make_graph_tools(hooks=hooks)]
 ## `configure()` — process-global settings
 
 ```python
-from pinboard import configure
+from agent_pinboard import configure
 
 configure(tool_log_soft_limit=200)
 ```
@@ -179,8 +179,8 @@ overrides are out of scope; for them, write a hook that drops records.
 
 ## Tool log
 
-Every `@fact` invocation appends one `ToolCallRecord` to the per-session
-log under namespace `("pinboard", thread_id, "tool_calls", record_id)`:
+Every `@pin` invocation appends one `ToolCallRecord` to the per-session
+log under namespace `("agent_pinboard", thread_id, "tool_calls", record_id)`:
 
 ```python
 @dataclass(slots=True, frozen=True)
@@ -220,7 +220,7 @@ If your tool takes an API token or password, exclude it from the log
 with `mask_args`:
 
 ```python
-@fact(model=VTReport, mask_args=["api_key"])
+@pin(model=VTReport, mask_args=["api_key"])
 @tool
 def vt_lookup(value: str, api_key: str, runtime: ToolRuntime) -> dict:
     """."""

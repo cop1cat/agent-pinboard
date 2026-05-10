@@ -7,11 +7,11 @@ from typing import Any
 from pydantic import Field
 from pydantic.fields import FieldInfo
 
-from pinboard.entity import Entity
-from pinboard.exceptions import PinBoardConfigError
+from agent_pinboard.entity import Entity
+from agent_pinboard.exceptions import AgentPinBoardConfigError
 
-# Key inside a field's ``json_schema_extra`` that holds PinBoard metadata.
-META_KEY = "__pinboard__"
+# Key inside a field's ``json_schema_extra`` that holds AgentPinBoard metadata.
+META_KEY = "__agent_pinboard__"
 
 
 def node(
@@ -20,7 +20,7 @@ def node(
     description: str,
     **field_kwargs: Any,
 ) -> Any:
-    """Build a Pydantic ``FieldInfo`` carrying PinBoard node-marker metadata.
+    """Build a Pydantic ``FieldInfo`` carrying AgentPinBoard node-marker metadata.
 
     Use in place of ``pydantic.Field`` for fields whose values should become
     nodes in the fact graph::
@@ -37,7 +37,7 @@ def node(
     type:
         The :class:`Entity` describing what this field's values represent.
         Must be an ``Entity`` instance — strings or other types raise
-        :class:`PinBoardConfigError`.
+        :class:`AgentPinBoardConfigError`.
     description:
         Mandatory, non-empty. Describes how this field relates to its event;
         rendered on edges in ``explore`` / ``timeline`` output.
@@ -48,16 +48,16 @@ def node(
     Returns
     -------
     FieldInfo
-        A standard Pydantic field with a ``__pinboard__`` entry in
+        A standard Pydantic field with a ``__agent_pinboard__`` entry in
         ``json_schema_extra``.
     """
     if not isinstance(type, Entity):
-        raise PinBoardConfigError(
+        raise AgentPinBoardConfigError(
             f"node(type=...) expects an Entity instance, got {type!r}. "
             "Define `MyEntity = Entity(name=..., description=...)` and pass it."
         )
     if not isinstance(description, str) or not description.strip():
-        raise PinBoardConfigError(
+        raise AgentPinBoardConfigError(
             "node(description=...) must be a non-empty string. "
             "Describe how this specific field relates to its event "
             "(Entity.description covers what the type means)."
@@ -65,7 +65,7 @@ def node(
 
     schema_extra = field_kwargs.pop("json_schema_extra", None) or {}
     if not isinstance(schema_extra, dict):
-        raise PinBoardConfigError(
+        raise AgentPinBoardConfigError(
             "node(...) does not support callable json_schema_extra"
         )
     schema_extra = {**schema_extra, META_KEY: {"entity": type}}

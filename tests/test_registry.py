@@ -4,8 +4,8 @@ import logging
 
 from pydantic import BaseModel, Field
 
-from pinboard import Entity, node
-from pinboard.registry import known_entities, register_model
+from agent_pinboard import Entity, node
+from agent_pinboard.registry import known_entities, register_model
 
 
 class TestRegistryEagerScan:
@@ -54,7 +54,7 @@ class TestRegistryEagerScan:
 
         class Process(BaseModel):
             pid: str | None = node(type=IP, description="pid-as-IP-just-for-test", default=None)
-            parent: "Process | None" = None
+            parent: Process | None = None
 
         Process.model_rebuild()
         register_model(Process)  # must terminate
@@ -63,7 +63,7 @@ class TestRegistryEagerScan:
 
 class TestRegistryConflictHandling:
     def test_duplicate_name_same_attrs_no_warning(
-        self, caplog: "logging.LogCaptureFixture"
+        self, caplog: logging.LogCaptureFixture
     ) -> None:
         IP = Entity(name="IP", description="ip")
 
@@ -79,7 +79,7 @@ class TestRegistryConflictHandling:
         assert not any("collision" in r.message for r in caplog.records)
 
     def test_duplicate_name_different_attrs_warns(
-        self, caplog: "logging.LogCaptureFixture"
+        self, caplog: logging.LogCaptureFixture
     ) -> None:
         IP1 = Entity(name="IP", description="first")
         IP2 = Entity(name="IP", description="second — different")

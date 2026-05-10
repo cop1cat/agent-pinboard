@@ -1,5 +1,5 @@
 [project]
-name = "pin-board"
+name = "agent-pinboard"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
@@ -30,7 +30,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["pinboard"]
+packages = ["agent_pinboard"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -19,7 +19,7 @@ _config = _Config()
 
 
 def configure(*, tool_log_soft_limit: int | None = None) -> None:
-    """Mutate process-wide PinBoard settings.
+    """Mutate process-wide AgentPinBoard settings.
 
     Settings apply to every session in this process; per-session overrides
     are out of scope for the MVP.

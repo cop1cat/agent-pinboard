@@ -2,7 +2,7 @@
 
 Implements the five extraction rules from README §4.1 via structural
 pattern matching. Pure function — does not mutate the graph; returns a
-``(nodes, edges, properties, warnings)`` quadruple that the ``@fact``
+``(nodes, edges, properties, warnings)`` quadruple that the ``@pin``
 decorator merges under the session lock.
 
 ``edge_type`` is always ``"{ModelClass}.{field_name}"``, where
@@ -17,10 +17,10 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from pinboard.exceptions import PinBoardExtractionError
-from pinboard.fields import field_entity
-from pinboard.graph import FactGraph
-from pinboard.models import EventId, FactEdge, FactNode
+from agent_pinboard.exceptions import AgentPinBoardExtractionError
+from agent_pinboard.fields import field_entity
+from agent_pinboard.graph import FactGraph
+from agent_pinboard.models import EventId, FactEdge, FactNode
 
 
 def extract(
@@ -98,7 +98,7 @@ def _walk(
             case list(), _ if entity is not None:
                 for item in value:
                     if isinstance(item, (BaseModel, list, dict, tuple)):
-                        raise PinBoardExtractionError(
+                        raise AgentPinBoardExtractionError(
                             f"field {model_cls.__name__}.{name}: list with node() expects "
                             f"primitives, got {type(item).__name__}"
                         )
@@ -124,7 +124,7 @@ def _walk(
                             new_facts, linked_facts, seen_linked, new_edges, warnings,
                         )
                     elif isinstance(item, (dict, list, tuple)):
-                        raise PinBoardExtractionError(
+                        raise AgentPinBoardExtractionError(
                             f"field {model_cls.__name__}.{name}: list of {type(item).__name__} "
                             "is not supported (use list[BaseModel] or list[primitive] with node())"
                         )
@@ -134,7 +134,7 @@ def _walk(
             # Rule 1 — primitive with node() metadata.
             case _, _ if entity is not None:
                 if isinstance(value, (dict, tuple)):
-                    raise PinBoardExtractionError(
+                    raise AgentPinBoardExtractionError(
                         f"field {model_cls.__name__}.{name}: node() expects a primitive, "
                         f"got {type(value).__name__}"
                     )

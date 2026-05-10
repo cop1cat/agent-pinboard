@@ -1,10 +1,9 @@
-"""Tests for get_evidence + @fact(store_raw=True)."""
+"""Tests for get_evidence + @pin(store_raw=True)."""
 
 from __future__ import annotations
 
 from typing import Annotated
 
-import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, START, StateGraph
@@ -14,8 +13,7 @@ from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
-from pinboard import Entity, fact, make_graph_tools, node
-
+from agent_pinboard import Entity, make_graph_tools, node, pin
 
 IP = Entity(name="IP", description="ip")
 
@@ -49,14 +47,14 @@ def _call(graph, name, args, *, call_id="c"):
     return out["messages"][-1].content
 
 
-@fact(model=CTEvent, store_raw=True)
+@pin(model=CTEvent, store_raw=True)
 @tool
 def fetch_with_raw(value: str, runtime: ToolRuntime) -> dict:
     """Persists raw return."""
     return {"src_ip": value, "extra": {"score": 87, "tags": ["foo", "bar"]}}
 
 
-@fact(model=CTEvent)  # store_raw=False (default)
+@pin(model=CTEvent)  # store_raw=False (default)
 @tool
 def fetch_without_raw(value: str, runtime: ToolRuntime) -> dict:
     """."""
@@ -65,7 +63,7 @@ def fetch_without_raw(value: str, runtime: ToolRuntime) -> dict:
 
 class TestStoreRaw:
     def test_get_evidence_returns_raw_when_stored(self, store: InMemoryStore) -> None:
-        from pinboard.session import get_or_load_session
+        from agent_pinboard.session import get_or_load_session
 
         graph = _build([fetch_with_raw, *make_graph_tools()], store)
         _call(graph, "fetch_with_raw", {"value": "1.2.3.4"}, call_id="a")
@@ -81,7 +79,7 @@ class TestStoreRaw:
         assert "tags" in out and "foo" in out
 
     def test_get_evidence_hint_when_not_stored(self, store: InMemoryStore) -> None:
-        from pinboard.session import get_or_load_session
+        from agent_pinboard.session import get_or_load_session
 
         graph = _build([fetch_without_raw, *make_graph_tools()], store)
         _call(graph, "fetch_without_raw", {"value": "1.1.1.1"}, call_id="a")
@@ -100,7 +98,7 @@ class TestStoreRaw:
 
 class TestRawNamespaceIsolation:
     def test_different_threads_isolated(self, store: InMemoryStore) -> None:
-        from pinboard import store as store_io
+        from agent_pinboard import store as store_io
 
         graph = _build([fetch_with_raw, *make_graph_tools()], store)
         # Two thread_ids, each gets its own raw payload.
@@ -119,7 +117,7 @@ class TestRawNamespaceIsolation:
             config={"configurable": {"thread_id": "beta"}},
         )
 
-        from pinboard.session import get_or_load_session
+        from agent_pinboard.session import get_or_load_session
         ev_alpha = list(get_or_load_session(store, "alpha").all_events())[0].id
         ev_beta = list(get_or_load_session(store, "beta").all_events())[0].id
 

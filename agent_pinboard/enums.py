@@ -18,7 +18,7 @@ class Direction(StrEnum):
 
 
 class OnDuplicate(StrEnum):
-    """Behaviour of ``@fact`` when a tool is called twice with identical args."""
+    """Behaviour of ``@pin`` when a tool is called twice with identical args."""
 
     ALWAYS = "always"
     SKIP = "skip"

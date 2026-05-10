@@ -1,6 +1,6 @@
-# PinBoard — Documentation (English)
+# AgentPinBoard — Documentation (English)
 
-PinBoard is a Python library that gives an LLM agent a **fact graph** as
+AgentPinBoard is a Python library that gives an LLM agent a **fact graph** as
 its working memory for the duration of one session.
 
 The agent calls tools, the tools' responses are auto-extracted into
@@ -11,7 +11,7 @@ a small set of prebuilt tools (`explore`, `timeline`, `graph_summary`,
 ## Reading order
 
 1. **[Quickstart](./quickstart.md)** — install, run a 30-line example.
-2. **[Concepts](./concepts.md)** — `Entity`, `node()`, `@fact`, `FactNode`, `EventNode`.
+2. **[Concepts](./concepts.md)** — `Entity`, `node()`, `@pin`, `FactNode`, `EventNode`.
 3. **[Extraction rules](./extraction-rules.md)** — the five rules that
    decide how a Pydantic field becomes a graph node.
 4. **[Graph tools](./graph-tools.md)** — what the agent sees when it

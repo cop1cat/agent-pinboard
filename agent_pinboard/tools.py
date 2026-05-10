@@ -27,23 +27,23 @@ import networkx as nx
 from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import ToolRuntime
 
-from pinboard import store as store_io
-from pinboard.enums import Direction
-from pinboard.exceptions import PinBoardConfigError
-from pinboard.graph import FactGraph
-from pinboard.hooks import PinBoardHooks
-from pinboard.models import EVENT_NODE_TYPE, EventNode, FactEdge, FactNode
-from pinboard.registry import known_entities
-from pinboard.session import get_or_load_session, lock_for, thread_id_from
+from agent_pinboard import store as store_io
+from agent_pinboard.enums import Direction
+from agent_pinboard.exceptions import AgentPinBoardConfigError
+from agent_pinboard.graph import FactGraph
+from agent_pinboard.hooks import AgentPinBoardHooks
+from agent_pinboard.models import EVENT_NODE_TYPE, EventNode, FactEdge, FactNode
+from agent_pinboard.registry import known_entities
+from agent_pinboard.session import get_or_load_session, lock_for, thread_id_from
 
 # --------------------------------------------------------------------------- #
 # Public factory.                                                             #
 # --------------------------------------------------------------------------- #
 
-def make_graph_tools(hooks: PinBoardHooks | None = None) -> list[BaseTool]:
+def make_graph_tools(hooks: AgentPinBoardHooks | None = None) -> list[BaseTool]:
     """Build the per-session set of graph-read tools.
 
-    ``hooks`` is accepted for symmetry with ``@fact``, but the read tools
+    ``hooks`` is accepted for symmetry with ``@pin``, but the read tools
     do not currently mutate the graph and so do not invoke them.
     """
 
@@ -187,7 +187,7 @@ def make_graph_tools(hooks: PinBoardHooks | None = None) -> list[BaseTool]:
         if not all_types:
             return (
                 "graph_summary: no entity types declared yet. "
-                "Apply @fact(model=...) to a tool to register types."
+                "Apply @pin(model=...) to a tool to register types."
             )
         lines = ["graph_summary:"]
         for t in all_types:
@@ -266,7 +266,7 @@ def make_graph_tools(hooks: PinBoardHooks | None = None) -> list[BaseTool]:
         """Return the raw tool return that produced ``event_id``.
 
         Only available if the producing tool was decorated with
-        ``@fact(store_raw=True)``. Otherwise returns a hint pointing at
+        ``@pin(store_raw=True)``. Otherwise returns a hint pointing at
         the EventNode's structured properties (which carry the non-node
         scalar fields from the parsed model).
         """
@@ -282,7 +282,7 @@ def make_graph_tools(hooks: PinBoardHooks | None = None) -> list[BaseTool]:
         if raw is None:
             return (
                 f"get_evidence: raw payload for {event_id!r} was not stored. "
-                f"Add `store_raw=True` to @fact on tool {ev.source_tool!r} to "
+                f"Add `store_raw=True` to @pin on tool {ev.source_tool!r} to "
                 "capture full returns. EventNode properties (parsed scalars):\n"
                 f"  {ev.properties}"
             )
@@ -380,10 +380,10 @@ def _graph(runtime: ToolRuntime | None) -> FactGraph:
 
 def _store_and_thread(runtime: ToolRuntime | None) -> tuple[object, str]:
     if runtime is None:
-        raise PinBoardConfigError("graph tool invoked without ToolRuntime")
+        raise AgentPinBoardConfigError("graph tool invoked without ToolRuntime")
     store = getattr(runtime, "store", None)
     if store is None:
-        raise PinBoardConfigError(
+        raise AgentPinBoardConfigError(
             "graph must be compiled with .compile(store=...) to use graph tools"
         )
     return store, thread_id_from(runtime)

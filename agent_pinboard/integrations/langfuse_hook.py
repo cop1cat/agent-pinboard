@@ -2,35 +2,35 @@
 
 Optional dependency. Install with::
 
-    pip install pinboard[langfuse]
-    # or:  uv add pinboard[langfuse]
+    pip install agent_pinboard[langfuse]
+    # or:  uv add agent_pinboard[langfuse]
 
 Usage::
 
     from langfuse import Langfuse
-    from pinboard.integrations.langfuse_hook import LangfuseHook
+    from agent_pinboard.integrations.langfuse_hook import LangfuseHook
 
     client = Langfuse(public_key=..., secret_key=..., host=...)
     hooks = LangfuseHook(client)
 
-    @fact(model=MyModel, hooks=hooks)
+    @pin(model=MyModel, hooks=hooks)
     @tool
     def my_tool(...): ...
 
 What the hook emits
 -------------------
 
-* On every ``on_ingest_complete`` — a Langfuse span ``"pinboard.ingest"``
+* On every ``on_ingest_complete`` — a Langfuse span ``"agent_pinboard.ingest"``
   with input = ingest summary, metadata = the per-ingest
   ``IngestResult`` dataclass.
 * On every ``on_graph_changed`` — a Langfuse span
-  ``"pinboard.graph_snapshot"`` whose metadata carries a
+  ``"agent_pinboard.graph_snapshot"`` whose metadata carries a
   Mermaid-flowchart rendering of the current top-N facts and the events
   that connect them. Langfuse renders Markdown/Mermaid in metadata,
   giving you a visual graph alongside the trace.
 
 The hook never raises; failures are logged at ERROR (the underlying
-``PinBoardHooks`` contract is preserved).
+``AgentPinBoardHooks`` contract is preserved).
 """
 
 from __future__ import annotations
@@ -39,9 +39,9 @@ import logging
 from dataclasses import asdict
 from typing import TYPE_CHECKING, override
 
-from pinboard.graph import FactGraph
-from pinboard.hooks import PinBoardHooks
-from pinboard.models import EVENT_NODE_TYPE, EventNode, FactNode, IngestResult
+from agent_pinboard.graph import FactGraph
+from agent_pinboard.hooks import AgentPinBoardHooks
+from agent_pinboard.models import EVENT_NODE_TYPE, EventNode, FactNode, IngestResult
 
 if TYPE_CHECKING:
     from langfuse import Langfuse  # type: ignore[import-not-found]
@@ -50,12 +50,12 @@ logger = logging.getLogger(__name__)
 
 _DEPENDENCY_HINT = (
     "LangfuseHook requires the langfuse package: install with "
-    "`pip install pinboard[langfuse]` or `pip install langfuse`."
+    "`pip install agent_pinboard[langfuse]` or `pip install langfuse`."
 )
 
 
-class LangfuseHook(PinBoardHooks):
-    """PinBoard hook that fans graph events into Langfuse spans."""
+class LangfuseHook(AgentPinBoardHooks):
+    """AgentPinBoard hook that fans graph events into Langfuse spans."""
 
     def __init__(
         self,
@@ -80,7 +80,7 @@ class LangfuseHook(PinBoardHooks):
     def on_ingest_complete(self, result: IngestResult) -> None:
         try:
             self._client.start_observation(
-                name="pinboard.ingest",
+                name="agent_pinboard.ingest",
                 as_type="span",
                 input=_summary(result),
                 output={
@@ -111,7 +111,7 @@ class LangfuseHook(PinBoardHooks):
             }
             event_count = len(graph.nodes_by_type.get(EVENT_NODE_TYPE, set()))
             self._client.start_observation(
-                name="pinboard.graph_snapshot",
+                name="agent_pinboard.graph_snapshot",
                 as_type="span",
                 input={"counts": counts, "events": event_count},
                 metadata={

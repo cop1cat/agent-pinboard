@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from langgraph.store.memory import InMemoryStore
 
-from pinboard import (
+from agent_pinboard import (
     Entity,
     EventNode,
     FactEdge,
     FactGraph,
     ToolCallRecord,
 )
-from pinboard import store as store_io
+from agent_pinboard import store as store_io
 
 
 def _ip(normalizer=None) -> Entity:
@@ -22,7 +22,7 @@ def _ip(normalizer=None) -> Entity:
 class TestRoundtrip:
     def test_persist_and_load_graph(self, store: InMemoryStore) -> None:
         g = FactGraph()
-        ev = EventNode(id="e-1", source_tool="t", timestamp=datetime.now(timezone.utc))
+        ev = EventNode(id="e-1", source_tool="t", timestamp=datetime.now(UTC))
         g.add_event(ev)
         nid, _ = g.upsert_fact(_ip(), "1.2.3.4", ev.id, "t")
         edge = FactEdge(event_id=ev.id, target_id=nid, edge_type="M.f", description="d")
@@ -38,13 +38,13 @@ class TestRoundtrip:
 
     def test_namespace_isolation(self, store: InMemoryStore) -> None:
         g_a = FactGraph()
-        ev_a = EventNode(id="ea", source_tool="t", timestamp=datetime.now(timezone.utc))
+        ev_a = EventNode(id="ea", source_tool="t", timestamp=datetime.now(UTC))
         g_a.add_event(ev_a)
         nid_a, _ = g_a.upsert_fact(_ip(), "1.1.1.1", ev_a.id, "t")
         store_io.persist_delta(store, "alpha", [ev_a, g_a.get(nid_a)], [])
 
         g_b = FactGraph()
-        ev_b = EventNode(id="eb", source_tool="t", timestamp=datetime.now(timezone.utc))
+        ev_b = EventNode(id="eb", source_tool="t", timestamp=datetime.now(UTC))
         g_b.add_event(ev_b)
         nid_b, _ = g_b.upsert_fact(_ip(), "2.2.2.2", ev_b.id, "t")
         store_io.persist_delta(store, "beta", [ev_b, g_b.get(nid_b)], [])
@@ -62,7 +62,7 @@ class TestToolCalls:
         rec1 = ToolCallRecord(
             tool_name="vt",
             args_repr="{}",
-            timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
             event_id="e-1",
             summary="ok",
             duration_ms=10,
@@ -70,7 +70,7 @@ class TestToolCalls:
         rec2 = ToolCallRecord(
             tool_name="vt",
             args_repr="{}",
-            timestamp=datetime(2026, 1, 2, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 1, 2, tzinfo=UTC),
             event_id="e-2",
             summary="ok",
             duration_ms=12,
@@ -85,7 +85,7 @@ class TestAsyncSymmetry:
     @pytest.mark.asyncio
     async def test_aload_persist(self, store: InMemoryStore) -> None:
         g = FactGraph()
-        ev = EventNode(id="e", source_tool="t", timestamp=datetime.now(timezone.utc))
+        ev = EventNode(id="e", source_tool="t", timestamp=datetime.now(UTC))
         g.add_event(ev)
         nid, _ = g.upsert_fact(_ip(), "9.9.9.9", ev.id, "t")
         await store_io.apersist_delta(store, "tid", [ev, g.get(nid)], [])

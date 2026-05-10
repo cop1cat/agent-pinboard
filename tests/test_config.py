@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-import pinboard
-from pinboard.config import _reset, configure, get_config
+import agent_pinboard
+from agent_pinboard.config import _reset, configure, get_config
 
 
 class TestConfigure:
@@ -31,5 +31,5 @@ class TestConfigure:
 class TestPublicAPISurface:
     def test_exports(self) -> None:
         # Verify every name in __all__ is importable from the package root.
-        for name in pinboard.__all__:
-            assert hasattr(pinboard, name), name
+        for name in agent_pinboard.__all__:
+            assert hasattr(agent_pinboard, name), name

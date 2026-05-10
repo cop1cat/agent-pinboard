@@ -1,6 +1,6 @@
 # Правила экстракции
 
-Когда `@fact` отрабатывает, он обходит провалидированную Pydantic-модель
+Когда `@pin` отрабатывает, он обходит провалидированную Pydantic-модель
 и применяет пять правил к каждому полю. Правила взаимоисключающие —
 ровно одно срабатывает на поле.
 
@@ -34,7 +34,7 @@ class VTReport(BaseModel):
 FactNode, со своим ребром типа `VTReport.related_ips`.
 
 Если элемент сам — `BaseModel`, `dict`, `tuple` или `list`, кидается
-`PinBoardExtractionError`. `node()` на списке ожидает плоских
+`AgentPinBoardExtractionError`. `node()` на списке ожидает плоских
 примитивов.
 
 ## Правило 4 — вложенная `BaseModel` (или `list[BaseModel]`) без `node()`
@@ -61,7 +61,7 @@ class CloudTrailEvent(BaseModel):
 `timeline(...)`. Используется для `event_time`, `latency_ms`, raw
 status кодов — значений, которые не стоит делать нодами.
 
-## Неподдерживаемые формы (кидают `PinBoardExtractionError`)
+## Неподдерживаемые формы (кидают `AgentPinBoardExtractionError`)
 
 - `dict[str, BaseModel]` или любой dict-контейнер на node-поле
 - `Union[NodeA, NodeB]` (Union разных нод-типов)

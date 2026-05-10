@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from pinboard import Entity, EventNode, FactEdge, FactGraph
+from agent_pinboard import Entity, EventNode, FactEdge, FactGraph
 
 
 def _make_filled_graph() -> tuple[FactGraph, str, str]:
     g = FactGraph()
     IP = Entity(name="IP", description="ip")
     User = Entity(name="User", description="u")
-    ev = EventNode(id="e-1", source_tool="fetch", timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    ev = EventNode(id="e-1", source_tool="fetch", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
     g.add_event(ev)
     nid_ip, _ = g.upsert_fact(IP, "1.2.3.4", ev.id, "fetch")
     nid_user, _ = g.upsert_fact(User, "alice", ev.id, "fetch")
@@ -26,8 +26,8 @@ class TestDumpLoad:
         payload = g.dump_to_dict()
 
         # Schema and version present.
-        assert payload["schema"] == "pinboard.factgraph"
-        assert "pinboard_version" in payload
+        assert payload["schema"] == "agent_pinboard.factgraph"
+        assert "agent_pinboard_version" in payload
         assert len(payload["nodes"]) == 3   # 1 event + 2 facts
         assert len(payload["edges"]) == 2
 
@@ -65,5 +65,5 @@ class TestLoadValidation:
 
     def test_missing_nodes_edges_treated_as_empty(self) -> None:
         # Forward-compat: tolerate a payload that lacks these keys.
-        restored = FactGraph.load_from_dict({"schema": "pinboard.factgraph"})
+        restored = FactGraph.load_from_dict({"schema": "agent_pinboard.factgraph"})
         assert list(restored.all_facts()) == []

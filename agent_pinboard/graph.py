@@ -6,7 +6,7 @@ for. Sidecars are derived state, rebuilt from scratch by
 :meth:`from_snapshot`.
 
 Every operation here is in-memory only — persistence is handled by
-``pinboard.store``.
+``agent_pinboard.store``.
 """
 
 from __future__ import annotations
@@ -18,9 +18,9 @@ from typing import Any
 
 import networkx as nx
 
-from pinboard.entity import Entity
-from pinboard.exceptions import PinBoardNormalizerError
-from pinboard.models import (
+from agent_pinboard.entity import Entity
+from agent_pinboard.exceptions import AgentPinBoardNormalizerError
+from agent_pinboard.models import (
     EVENT_NODE_TYPE,
     EventId,
     EventNode,
@@ -74,7 +74,7 @@ class FactGraph:
         empty string, returns ``(None, False)`` and appends a warning to
         ``warnings`` (the caller — typically ``IngestResult`` — can surface it).
 
-        Raises :class:`PinBoardNormalizerError` if the user-supplied
+        Raises :class:`AgentPinBoardNormalizerError` if the user-supplied
         normalizer crashes — this is fail-loud per README §6.5.
         """
         if value is None:
@@ -83,7 +83,7 @@ class FactGraph:
         try:
             canonical = entity.normalizer(value) if entity.normalizer else str(value)
         except Exception as exc:  # noqa: BLE001 — wrap any user error
-            raise PinBoardNormalizerError(
+            raise AgentPinBoardNormalizerError(
                 f"normalizer for Entity({entity.name!r}) failed on value {value!r}: {exc}"
             ) from exc
 
@@ -215,12 +215,12 @@ class FactGraph:
         """Serialise to a JSON-friendly dict for snapshotting / archival.
 
         The format is stable for the duration of one library minor
-        version; ``pinboard_version`` is included so future migrators
+        version; ``agent_pinboard_version`` is included so future migrators
         can detect older dumps.
         """
         # Local import avoids a top-level circular dependency.
-        from pinboard import __version__ as _pinboard_version
-        from pinboard import store as store_io
+        from agent_pinboard import __version__ as _agent_agent_pinboard_version
+        from agent_pinboard import store as store_io
 
         nodes_payload: list[dict[str, Any]] = []
         for nid in self.g.nodes:
@@ -232,8 +232,8 @@ class FactGraph:
             if isinstance(edge, FactEdge):
                 edges_payload.append(store_io._edge_to_dict(edge))
         return {
-            "pinboard_version": _pinboard_version,
-            "schema": "pinboard.factgraph",
+            "agent_pinboard_version": _agent_agent_pinboard_version,
+            "schema": "agent_pinboard.factgraph",
             "nodes": nodes_payload,
             "edges": edges_payload,
         }
@@ -244,16 +244,16 @@ class FactGraph:
 
         Raises :class:`ValueError` if the payload is missing required
         keys. Cross-version migration is the caller's responsibility:
-        check ``payload["pinboard_version"]`` if the format may have
+        check ``payload["agent_pinboard_version"]`` if the format may have
         changed since the dump was written.
         """
-        from pinboard import store as store_io
+        from agent_pinboard import store as store_io
 
         if not isinstance(payload, dict):
             raise ValueError("FactGraph.load_from_dict expects a dict payload")
-        if payload.get("schema") != "pinboard.factgraph":
+        if payload.get("schema") != "agent_pinboard.factgraph":
             raise ValueError(
-                "payload schema mismatch: expected 'pinboard.factgraph', "
+                "payload schema mismatch: expected 'agent_pinboard.factgraph', "
                 f"got {payload.get('schema')!r}"
             )
         nodes = [store_io._node_from_dict(d) for d in payload.get("nodes", [])]

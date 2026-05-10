@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from pinboard import Entity, EventNode, FactEdge, FactGraph, IngestResult
-
+from agent_pinboard import Entity, EventNode, FactEdge, FactGraph, IngestResult
 
 pytest.importorskip("websockets")
 
 
-from pinboard.integrations.websocket_hook import (
+from agent_pinboard.integrations.websocket_hook import (
     WebSocketHook,
     _build_snapshot,
     _edge_to_payload,
@@ -25,7 +24,7 @@ from pinboard.integrations.websocket_hook import (
 
 def _ev(eid: str = "e-1") -> EventNode:
     return EventNode(id=eid, source_tool="fetch",
-                     timestamp=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
+                     timestamp=datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC))
 
 
 def _make_graph() -> tuple[FactGraph, str]:
@@ -64,13 +63,13 @@ class TestHookEnqueues:
         assert out[0]["edge"]["edge_type"] == "M.f"
 
     def test_link_found_drained(self) -> None:
-        from pinboard import FactNode
+        from agent_pinboard import FactNode
 
         h = WebSocketHook()
         n = FactNode(id="x", node_type="IP", value="1.1.1.1",
                      canonical_value="1.1.1.1", properties={},
-                     first_seen=datetime.now(timezone.utc),
-                     last_seen=datetime.now(timezone.utc))
+                     first_seen=datetime.now(UTC),
+                     last_seen=datetime.now(UTC))
         h.on_link_found(n, "e-1")
         out = h.drain_pending()
         assert out[0]["type"] == "link_found"
@@ -136,11 +135,11 @@ class TestPayloads:
         assert payload["label"] == f"fetch@{ev.timestamp.strftime('%H:%M:%S')}"
 
     def test_fact_node_payload(self) -> None:
-        from pinboard import FactNode
+        from agent_pinboard import FactNode
         n = FactNode(id="n", node_type="IP", value="1.1.1.1",
                      canonical_value="1.1.1.1", properties={},
-                     first_seen=datetime.now(timezone.utc),
-                     last_seen=datetime.now(timezone.utc))
+                     first_seen=datetime.now(UTC),
+                     last_seen=datetime.now(UTC))
         payload = _node_to_payload(n)
         assert payload["kind"] == "fact"
         assert payload["node_type"] == "IP"
@@ -212,7 +211,7 @@ class TestServerSmoke:
 
         h = WebSocketHook()
         html_file = tmp_path / "page.html"
-        html_file.write_text("<!doctype html><title>pinboard demo</title>")
+        html_file.write_text("<!doctype html><title>agent_pinboard demo</title>")
 
         port = 8988
         server_task = asyncio.create_task(
@@ -227,7 +226,7 @@ class TestServerSmoke:
             data = await asyncio.to_thread(
                 lambda: urllib.request.urlopen(f"http://127.0.0.1:{port}/").read()
             )
-            assert b"pinboard demo" in data
+            assert b"agent_pinboard demo" in data
             # WS upgrade still works on the same port.
             from websockets.asyncio.client import connect
             async with connect(f"ws://127.0.0.1:{port}") as ws:

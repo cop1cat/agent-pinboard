@@ -2,11 +2,11 @@
 
 ## Install
 
-PinBoard is not on PyPI yet. Install from source:
+AgentPinBoard is not on PyPI yet. Install from source:
 
 ```bash
 git clone <repo>
-cd pinboard
+cd agent_pinboard
 uv sync
 ```
 
@@ -30,7 +30,7 @@ from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
-from pinboard import Entity, fact, make_graph_tools, node
+from agent_pinboard import Entity, pin, make_graph_tools, node
 
 # 1. Declare an entity type. Defines what kind of thing a node represents.
 IP = Entity(
@@ -43,8 +43,8 @@ IP = Entity(
 class FetchResult(BaseModel):
     src_ip: str = node(type=IP, description="IP from which the call was made")
 
-# 3. Decorate a tool. @fact must always be ABOVE @tool.
-@fact(model=FetchResult)
+# 3. Decorate a tool. @pin must always be ABOVE @tool.
+@pin(model=FetchResult)
 @tool
 def fetch(query: str, runtime: ToolRuntime) -> dict:
     """Pretend to call an upstream API."""
@@ -94,11 +94,11 @@ a new one.
 
 ## What just happened
 
-1. `@fact(model=FetchResult)` was applied to the `fetch` tool. At
-   decoration time PinBoard scanned the model and registered the `IP`
+1. `@pin(model=FetchResult)` was applied to the `fetch` tool. At
+   decoration time AgentPinBoard scanned the model and registered the `IP`
    entity in the session registry.
 2. The first call to `fetch` returned `{"src_ip": "192.168.001.001"}`.
-   PinBoard validated it against `FetchResult`, created an `EventNode`
+   AgentPinBoard validated it against `FetchResult`, created an `EventNode`
    for the call, ran the `IP` field's normalizer (`canonical_ip`), and
    inserted a single `FactNode` of type `IP`.
 3. `graph_summary` shows known types (from the registry) plus their

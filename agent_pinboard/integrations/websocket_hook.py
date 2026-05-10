@@ -2,7 +2,7 @@
 
 Optional dependency. Install with::
 
-    uv add 'pinboard[ws]'        # or:  pip install pinboard[ws]
+    uv add 'agent_pinboard[ws]'        # or:  pip install agent_pinboard[ws]
 
 Designed to drive a live visualisation (e.g. the Cytoscape.js demo in
 ``examples/web/``). The hook itself is just a delta producer with a
@@ -24,7 +24,7 @@ multiple are streaming through one server.
 
 Threading
 ---------
-The hook itself is sync (it's called from inside ``@fact`` ingestion
+The hook itself is sync (it's called from inside ``@pin`` ingestion
 under a threading lock). Deltas are pushed into a thread-safe queue;
 the asyncio server drains the queue from the loop thread. This keeps
 ingestion latency unaffected.
@@ -40,9 +40,9 @@ from collections.abc import AsyncIterator
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any, override
 
-from pinboard.graph import FactGraph
-from pinboard.hooks import PinBoardHooks
-from pinboard.models import EVENT_NODE_TYPE, EventNode, FactEdge, FactNode, IngestResult
+from agent_pinboard.graph import FactGraph
+from agent_pinboard.hooks import AgentPinBoardHooks
+from agent_pinboard.models import EVENT_NODE_TYPE, EventNode, FactEdge, FactNode, IngestResult
 
 if TYPE_CHECKING:
     pass
@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 _DEPENDENCY_HINT = (
     "WebSocketHook + serve_websocket() require the websockets package: "
-    "install with `pip install pinboard[ws]` or `pip install websockets`."
+    "install with `pip install agent_pinboard[ws]` or `pip install websockets`."
 )
 
 
@@ -59,10 +59,10 @@ _DEPENDENCY_HINT = (
 # Hook                                                                         #
 # --------------------------------------------------------------------------- #
 
-class WebSocketHook(PinBoardHooks):
+class WebSocketHook(AgentPinBoardHooks):
     """Pushes graph deltas into a queue for a separate WS server to drain.
 
-    Construct one hook per agent and pass it both to ``@fact(hooks=...)``
+    Construct one hook per agent and pass it both to ``@pin(hooks=...)``
     *and* to ``serve_websocket(hook, ...)`` (in the asyncio main).
 
     Parameters
@@ -103,7 +103,7 @@ class WebSocketHook(PinBoardHooks):
         """Most recent full snapshot, or ``None`` if no ingest has happened."""
         return self._latest_snapshot
 
-    # ---- PinBoardHooks overrides ----------------------------------------
+    # ---- AgentPinBoardHooks overrides ----------------------------------------
 
     @override
     def on_node_added(self, node: FactNode | EventNode) -> None:
@@ -180,13 +180,13 @@ async def serve_websocket(
     Example::
 
         import asyncio
-        from pinboard.integrations.websocket_hook import (
+        from agent_pinboard.integrations.websocket_hook import (
             WebSocketHook, serve_websocket,
         )
 
         hook = WebSocketHook(thread_id_label="demo")
 
-        @fact(model=MyModel, hooks=hook)
+        @pin(model=MyModel, hooks=hook)
         @tool
         def my_tool(...): ...
 
@@ -271,7 +271,7 @@ async def serve_websocket(
                 clients.discard(ws)
 
     async with serve(handler, host, port, process_request=http_route):
-        logger.info("PinBoard server on http://%s:%d  (ws on same port)", host, port)
+        logger.info("AgentPinBoard server on http://%s:%d  (ws on same port)", host, port)
         await broadcaster()
 
 

@@ -19,16 +19,15 @@ from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-from pinboard import (
+from agent_pinboard import (
+    AgentPinBoardValidationError,
     Entity,
     OnDuplicate,
-    PinBoardValidationError,
-    fact,
     make_graph_tools,
     node,
+    pin,
 )
-from pinboard.session import get_or_load_session, lock_for
-
+from agent_pinboard.session import get_or_load_session
 
 # --------------------------------------------------------------------------- #
 # Common fixtures.                                                            #
@@ -82,7 +81,7 @@ def _call(graph, name: str, args: dict, thread_id: str = "tid") -> str:
 # --------------------------------------------------------------------------- #
 
 def test_ac1_nested_extraction(store: InMemoryStore) -> None:
-    @fact(model=CloudTrailEvent)
+    @pin(model=CloudTrailEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -119,13 +118,13 @@ def test_ac2_autolink_and_dedup(store: InMemoryStore) -> None:
     class Report(BaseModel):
         ip: str = node(type=IP, description="queried")
 
-    @fact(model=CloudTrailEvent)
+    @pin(model=CloudTrailEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
         return {"src_ip": "1.2.3.4", "action": "x"}
 
-    @fact(model=Report)
+    @pin(model=Report)
     @tool
     def vt(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -150,11 +149,11 @@ def test_ac2_autolink_and_dedup(store: InMemoryStore) -> None:
 def test_ac3_recursion_guard(store: InMemoryStore) -> None:
     class Process(BaseModel):
         pid: str | None = node(type=IP, description="pid", default=None)
-        parent: "Process | None" = None
+        parent: Process | None = None
 
     Process.model_rebuild()
 
-    @fact(model=Process)
+    @pin(model=Process)
     @tool
     def scan(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -172,9 +171,9 @@ def test_ac3_recursion_guard(store: InMemoryStore) -> None:
 # --------------------------------------------------------------------------- #
 
 def test_ac4_concurrent_ingestion(store: InMemoryStore) -> None:
-    """Drive @fact wrappers in parallel threads; rely on per-session RLock."""
+    """Drive @pin wrappers in parallel threads; rely on per-session RLock."""
 
-    @fact(model=CloudTrailEvent)
+    @pin(model=CloudTrailEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -217,7 +216,7 @@ def test_ac5_duplicate_skip(store: InMemoryStore) -> None:
         def __getattr__(self, name):
             return lambda *a, **kw: None
 
-    @fact(model=CloudTrailEvent, on_duplicate=OnDuplicate.SKIP, hooks=H())  # type: ignore[arg-type]
+    @pin(model=CloudTrailEvent, on_duplicate=OnDuplicate.SKIP, hooks=H())  # type: ignore[arg-type]
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -241,14 +240,14 @@ def test_ac6_fail_loud_validation(store: InMemoryStore) -> None:
     class Strict(BaseModel):
         src_ip: str = node(type=IP, description="src")  # required
 
-    @fact(model=Strict)
+    @pin(model=Strict)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
         return {"unrelated": 42}
 
     graph = _build([fetch], store)
-    with pytest.raises(PinBoardValidationError):
+    with pytest.raises(AgentPinBoardValidationError):
         _call(graph, "fetch", {"value": "x"})
     g = get_or_load_session(store, "tid")
     assert list(g.search_by_type("IP")) == []
@@ -260,7 +259,7 @@ def test_ac6_fail_loud_validation(store: InMemoryStore) -> None:
 # --------------------------------------------------------------------------- #
 
 def test_ac7_session_isolation(store: InMemoryStore) -> None:
-    @fact(model=CloudTrailEvent)
+    @pin(model=CloudTrailEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -283,7 +282,7 @@ def test_ac7_session_isolation(store: InMemoryStore) -> None:
 # --------------------------------------------------------------------------- #
 
 def test_ac8_discovery_without_ingestion(store: InMemoryStore) -> None:
-    @fact(model=CloudTrailEvent)
+    @pin(model=CloudTrailEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""

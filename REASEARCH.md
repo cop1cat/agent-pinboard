@@ -1,6 +1,6 @@
 # LLM-агентская рабочая память как граф фактов: prior art и ландшафт решений
 
-**PinBoard занимает уникальную и пока незанятую нишу.** Ни одна из существующих библиотек не реализует комбинацию декларативных Fact-аннотаций на полях Pydantic-моделей, side-effect декоратора `@fact` для тулов и session-scoped графа без LLM-извлечения. Ближайшие конкуренты — Graphiti и Cognee — ориентированы на персистентную долговременную память с LLM-extraction, что делает их принципиально другими по архитектуре, стоимости и паттернам использования. Однако зрелые системы предлагают ряд возможностей (bi-temporal модель, confidence scoring, обработка противоречий), отсутствие которых в PinBoard составляет основной дизайн-риск.
+**AgentPinBoard занимает уникальную и пока незанятую нишу.** Ни одна из существующих библиотек не реализует комбинацию декларативных Fact-аннотаций на полях Pydantic-моделей, side-effect декоратора `@pin` для тулов и session-scoped графа без LLM-извлечения. Ближайшие конкуренты — Graphiti и Cognee — ориентированы на персистентную долговременную память с LLM-extraction, что делает их принципиально другими по архитектуре, стоимости и паттернам использования. Однако зрелые системы предлагают ряд возможностей (bi-temporal модель, confidence scoring, обработка противоречий), отсутствие которых в AgentPinBoard составляет основной дизайн-риск.
 
 ---
 
@@ -10,7 +10,7 @@
 
 Graphiti реализует трёхуровневый граф знаний в Neo4j/FalkorDB/Neptune: **эпизодический подграф** (сырые данные), **семантический подграф** (извлечённые сущности и факты на рёбрах) и **community-подграф** (кластеры сущностей с суммаризациями). Архитектура напоминает модель человеческой памяти с разделением на эпизодическую и семантическую. Каждая единица информации — «эпизод» (message, text или json) — обрабатывается через 6-шаговый LLM-пайплайн: извлечение сущностей → дедупликация сущностей → извлечение фактов → дедупликация рёбер → темпоральное извлечение → инвалидация старых фактов.
 
-**Ключевое отличие от PinBoard**: Graphiti полагается на LLM для всех этапов извлечения — это даёт гибкость, но приводит к **600K+ токенов на диалог** по некоторым бенчмаркам и **1000+ API-запросов на 10K символов текста**. PinBoard полностью исключает LLM из извлечения: факты определяются декларативно через аннотации `Annotated[T, Fact(...)]`, что делает процесс детерминированным и бесплатным. Graphiti реализует **bi-temporal модель** (valid_at/invalid_at + created_at/expired_at) — зрелый подход, которого у PinBoard нет. Entity resolution в Graphiti прошёл эволюцию от чистого LLM-matching до MinHash+LSH с LLM-fallback, что существенно снизило стоимость. Graphiti имеет официальную интеграцию с LangGraph, но спроектирован для **персистентной cross-session памяти** — использование для session-scoped сценариев возможно через `group_id`, но не является основным паттерном. Проблемы на практике: event loop конфликты с async-фреймворками, сбои structured output с не-OpenAI моделями (issues #912, #485), hallucinations при entity resolution (#760).
+**Ключевое отличие от AgentPinBoard**: Graphiti полагается на LLM для всех этапов извлечения — это даёт гибкость, но приводит к **600K+ токенов на диалог** по некоторым бенчмаркам и **1000+ API-запросов на 10K символов текста**. AgentPinBoard полностью исключает LLM из извлечения: факты определяются декларативно через аннотации `Annotated[T, Fact(...)]`, что делает процесс детерминированным и бесплатным. Graphiti реализует **bi-temporal модель** (valid_at/invalid_at + created_at/expired_at) — зрелый подход, которого у AgentPinBoard нет. Entity resolution в Graphiti прошёл эволюцию от чистого LLM-matching до MinHash+LSH с LLM-fallback, что существенно снизило стоимость. Graphiti имеет официальную интеграцию с LangGraph, но спроектирован для **персистентной cross-session памяти** — использование для session-scoped сценариев возможно через `group_id`, но не является основным паттерном. Проблемы на практике: event loop конфликты с async-фреймворками, сбои structured output с не-OpenAI моделями (issues #912, #485), hallucinations при entity resolution (#760).
 
 GitHub: https://github.com/getzep/graphiti | arXiv: 2501.13956
 
@@ -18,7 +18,7 @@ GitHub: https://github.com/getzep/graphiti | arXiv: 2501.13956
 
 Mem0 — гибридная система: **vector store (основной) + опциональный graph store**. При вызове `memory.add()` LLM извлекает факты и решает, что делать: ADD, UPDATE, DELETE или NOOP. Граф в Mem0 хранит только тонкие триплеты (source → relationship → destination) без натурально-языковых фактов на рёбрах — в отличие от Graphiti, где рёбра несут полные описания фактов с эмбеддингами.
 
-**Ключевое отличие от PinBoard**: Mem0 — это персистентная долговременная память для персонализации (user preferences), а не session-scoped рабочая память для расследований. Граф и вектор-стор **не разделяют ID и работают независимо**, что приводит к рассинхронизации. Нет temporal validity на фактах. На LongMemEval набирает только **49%**, проваливаясь на multi-hop запросах. Токен-эффективнее Graphiti (~1,764 токена/диалог), но за счёт потери структурной информации.
+**Ключевое отличие от AgentPinBoard**: Mem0 — это персистентная долговременная память для персонализации (user preferences), а не session-scoped рабочая память для расследований. Граф и вектор-стор **не разделяют ID и работают независимо**, что приводит к рассинхронизации. Нет temporal validity на фактах. На LongMemEval набирает только **49%**, проваливаясь на multi-hop запросах. Токен-эффективнее Graphiti (~1,764 токена/диалог), но за счёт потери структурной информации.
 
 GitHub: https://github.com/mem0ai/mem0
 
@@ -26,15 +26,15 @@ GitHub: https://github.com/mem0ai/mem0
 
 Letta реализует **OS-inspired иерархическую память**: core memory (in-context блоки, которые агент редактирует через tool calls), recall memory (поиск по истории), archival memory (vector store). Это принципиально другой подход — **агент сам управляет своей памятью** через self-editing, без автоматического извлечения сущностей. Нет knowledge graph, нет entity resolution, нет структурированных фактов.
 
-**Ключевое отличие от PinBoard**: Letta решает задачу **context window management** (как дать агенту иллюзию бесконечной памяти), а не задачу структурированного представления знаний. Концепция memory blocks (self-editable текстовые блоки) ортогональна графу фактов и может быть комплементарна — PinBoard мог бы использовать подход memory blocks для summary-представления графа в контексте.
+**Ключевое отличие от AgentPinBoard**: Letta решает задачу **context window management** (как дать агенту иллюзию бесконечной памяти), а не задачу структурированного представления знаний. Концепция memory blocks (self-editable текстовые блоки) ортогональна графу фактов и может быть комплементарна — AgentPinBoard мог бы использовать подход memory blocks для summary-представления графа в контексте.
 
 GitHub: https://github.com/letta-ai/letta
 
 ### Cognee — ближайший по духу, но document-oriented
 
-Cognee строит **полноценный knowledge graph** через ECL-пайплайн (Extract → Cognify → Load). Использует Pydantic-модели DataPoint как основу для нод и рёбер — **архитектурно ближайший аналог PinBoard** в части декларативного определения типов. Поддерживает **онтологии (OWL/RDF)** для каноникализации извлечённых сущностей — зрелая функция, отсутствующая у PinBoard. Уникальная функция `memify()` — самосовершенствование графа: pruning стейл-нод, усиление частых связей, добавление производных фактов.
+Cognee строит **полноценный knowledge graph** через ECL-пайплайн (Extract → Cognify → Load). Использует Pydantic-модели DataPoint как основу для нод и рёбер — **архитектурно ближайший аналог AgentPinBoard** в части декларативного определения типов. Поддерживает **онтологии (OWL/RDF)** для каноникализации извлечённых сущностей — зрелая функция, отсутствующая у AgentPinBoard. Уникальная функция `memify()` — самосовершенствование графа: pruning стейл-нод, усиление частых связей, добавление производных фактов.
 
-**Ключевое отличие от PinBoard**: Cognee ориентирован на **document ingestion** (PDF, CSV, 38+ форматов), а не на парсинг ответов API-тулов. Извлечение LLM-driven. Заявляет поддержку session memory через `session_id`, но основной фокус — персистентный граф знаний. Нет side-effect декоратора для тулов, нет автолинковки по canonical_value.
+**Ключевое отличие от AgentPinBoard**: Cognee ориентирован на **document ingestion** (PDF, CSV, 38+ форматов), а не на парсинг ответов API-тулов. Извлечение LLM-driven. Заявляет поддержку session memory через `session_id`, но основной фокус — персистентный граф знаний. Нет side-effect декоратора для тулов, нет автолинковки по canonical_value.
 
 GitHub: https://github.com/topoteretes/cognee
 
@@ -42,7 +42,7 @@ GitHub: https://github.com/topoteretes/cognee
 
 PropertyGraphIndex предоставляет **зрелую graph-инфраструктуру**: labeled property graph с типизированными нодами (EntityNode, ChunkNode), рёбрами с properties, несколькими стратегиями извлечения (SchemaLLMPathExtractor с Pydantic-валидацией, ImplicitPathExtractor без LLM). API `upsert_nodes()` / `upsert_relations()` позволяет программно добавлять ноды/рёбра в runtime.
 
-**Ключевое отличие от PinBoard**: PropertyGraphIndex спроектирован для **document RAG**, не для agent working memory. Нет session scoping, нет TTL, нет интеграции с agent lifecycle. Теоретически можно использовать `SimplePropertyGraphStore` (in-memory) как хранилище для session-графа, но потребуется полностью custom обвязка. KnowledgeGraphIndex **официально deprecated** в пользу PropertyGraphIndex.
+**Ключевое отличие от AgentPinBoard**: PropertyGraphIndex спроектирован для **document RAG**, не для agent working memory. Нет session scoping, нет TTL, нет интеграции с agent lifecycle. Теоретически можно использовать `SimplePropertyGraphStore` (in-memory) как хранилище для session-графа, но потребуется полностью custom обвязка. KnowledgeGraphIndex **официально deprecated** в пользу PropertyGraphIndex.
 
 Docs: https://docs.llamaindex.ai/en/stable/module_guides/indexing/lpg_index_guide/
 
@@ -50,7 +50,7 @@ Docs: https://docs.llamaindex.ai/en/stable/module_guides/indexing/lpg_index_guid
 
 LangGraph реализует **двухуровневую память**: checkpoints (thread-scoped состояние агента между шагами) и Store (cross-thread key-value хранилище с namespace-изоляцией и vector search). `InMemoryStore` поддерживает semantic search по эмбеддингам. Namespace-паттерн (`("user_123", "memories")`) обеспечивает мульти-тенантную изоляцию.
 
-**Ключевое отличие от PinBoard**: Store — это **плоский key-value store**, не граф. Нет концепции нод, рёбер, graph traversal, entity resolution. PinBoard фактически строит граф **поверх** InMemoryStore, добавляя графовую семантику, которой LangGraph не предоставляет. Библиотека `langmem` добавляет automated fact extraction, но хранит факты как отдельные документы без графовой структуры. Старые LangChain memory-классы (ConversationEntityMemory и др.) **deprecated**.
+**Ключевое отличие от AgentPinBoard**: Store — это **плоский key-value store**, не граф. Нет концепции нод, рёбер, graph traversal, entity resolution. AgentPinBoard фактически строит граф **поверх** InMemoryStore, добавляя графовую семантику, которой LangGraph не предоставляет. Библиотека `langmem` добавляет automated fact extraction, но хранит факты как отдельные документы без графовой структуры. Старые LangChain memory-классы (ConversationEntityMemory и др.) **deprecated**.
 
 Docs: https://docs.langchain.com/oss/python/langgraph/persistence
 
@@ -87,11 +87,11 @@ Docs: https://docs.langchain.com/oss/python/langgraph/persistence
 
 ### Контроль каскадного обогащения без budget-механизмов
 
-Семь паттернов из практики: **(1) Hard guardrails** — абсолютные лимиты на количество шагов и время выполнения (MAX_TURNS=25, MAX_TIME=300s); **(2) Repetition detection** — мониторинг повторных tool calls с одинаковыми параметрами; **(3) Depth limits** — ReDel (arxiv:2408.02248) показывает, что цепочки 3+ делегаций с 0–1 детьми = undercommitment и бесконечные циклы; **(4) FSM + explicit Exit tool** — агент работает в конечном автомате с явным инструментом завершения; **(5) Goal reminders** — периодическая реинъекция исходной цели в контекст; **(6) LogAct write-ahead log** — действия записываются до выполнения, pluggable voters могут заблокировать; **(7) Relevance decay** — implicit budget через снижение relevance score при удалении от исходного запроса. Для PinBoard рекомендуется комбинация: depth limit на explore + repetition detection на уровне графа + explicit Exit.
+Семь паттернов из практики: **(1) Hard guardrails** — абсолютные лимиты на количество шагов и время выполнения (MAX_TURNS=25, MAX_TIME=300s); **(2) Repetition detection** — мониторинг повторных tool calls с одинаковыми параметрами; **(3) Depth limits** — ReDel (arxiv:2408.02248) показывает, что цепочки 3+ делегаций с 0–1 детьми = undercommitment и бесконечные циклы; **(4) FSM + explicit Exit tool** — агент работает в конечном автомате с явным инструментом завершения; **(5) Goal reminders** — периодическая реинъекция исходной цели в контекст; **(6) LogAct write-ahead log** — действия записываются до выполнения, pluggable voters могут заблокировать; **(7) Relevance decay** — implicit budget через снижение relevance score при удалении от исходного запроса. Для AgentPinBoard рекомендуется комбинация: depth limit на explore + repetition detection на уровне графа + explicit Exit.
 
 ### Паттерны логов действий при сжатии контекста
 
-Каноническая трёхуровневая модель: short-term (in-context window), episodic (лог событий с TTL), semantic (знания). **Structured tool call log** должен фиксировать: tool name, input params (sanitized), output, timestamp, latency, status, error, **rationale** (почему агент выбрал этот тул) и **interpretation** (как агент интерпретировал результат). При сжатии контекста: **rolling window** последних N tool calls в контексте + суммаризация старших записей через LLM + off-context retrieval из vector store по запросу. LogAct-паттерн (arxiv:2604.07988) предлагает write-ahead log с semantic recovery: после crash агент анализирует свой лог и генерирует компенсирующие действия. PinBoard's `what_have_i_done` реализует именно этот паттерн — лог вызовов как инструмент для агента.
+Каноническая трёхуровневая модель: short-term (in-context window), episodic (лог событий с TTL), semantic (знания). **Structured tool call log** должен фиксировать: tool name, input params (sanitized), output, timestamp, latency, status, error, **rationale** (почему агент выбрал этот тул) и **interpretation** (как агент интерпретировал результат). При сжатии контекста: **rolling window** последних N tool calls в контексте + суммаризация старших записей через LLM + off-context retrieval из vector store по запросу. LogAct-паттерн (arxiv:2604.07988) предлагает write-ahead log с semantic recovery: после crash агент анализирует свой лог и генерирует компенсирующие действия. AgentPinBoard's `what_have_i_done` реализует именно этот паттерн — лог вызовов как инструмент для агента.
 
 ---
 
@@ -99,29 +99,29 @@ Docs: https://docs.langchain.com/oss/python/langgraph/persistence
 
 ### Что переносимо из i2, Maltego и Palantir в LLM-агентскую память
 
-IBM i2 Analyst's Notebook задаёт методологию **ELP (Entity-Link-Property)** — фундаментальную модель данных, совпадающую с PinBoard. Ключевой инсайт: **не все связи равноценны** — i2 и Sentinel Visualizer взвешивают рёбра по типу отношения и надёжности источника (source reliability + credibility). Timeline analysis — хронологическое отображение связей для аномалий — прямо переносим в `timeline`-тул PinBoard. Maltego's Transform-паттерн (entity → related entities) — точный аналог PinBoard's `explore`. **Entity merging по type + key value** в Maltego — это ровно автолинковка PinBoard по `(node_type, canonical_value)`. Maltego Machines (макросы из цепочек transforms с автоочисткой orphan-нод) подсказывают паттерн для automated enrichment pipelines. Palantir Gotham подтверждает жизнеспособность модели «множество источников → единый граф», что соответствует PinBoard's use case связывания сущностей между разными API.
+IBM i2 Analyst's Notebook задаёт методологию **ELP (Entity-Link-Property)** — фундаментальную модель данных, совпадающую с AgentPinBoard. Ключевой инсайт: **не все связи равноценны** — i2 и Sentinel Visualizer взвешивают рёбра по типу отношения и надёжности источника (source reliability + credibility). Timeline analysis — хронологическое отображение связей для аномалий — прямо переносим в `timeline`-тул AgentPinBoard. Maltego's Transform-паттерн (entity → related entities) — точный аналог AgentPinBoard's `explore`. **Entity merging по type + key value** в Maltego — это ровно автолинковка AgentPinBoard по `(node_type, canonical_value)`. Maltego Machines (макросы из цепочек transforms с автоочисткой orphan-нод) подсказывают паттерн для automated enrichment pipelines. Palantir Gotham подтверждает жизнеспособность модели «множество источников → единый граф», что соответствует AgentPinBoard's use case связывания сущностей между разными API.
 
 ### OCSF и STIX/TAXII как словари для node_type
 
-**STIX 2.1** — готовый к использованию граф-ориентированный стандарт. SDO (Attack Pattern, Threat Actor, Malware, Campaign, Vulnerability и др.) и SCO (IPv4-Addr, Domain-Name, Email-Addr, File, Process, User-Account и др.) **идеально подходят как значения node_type** в PinBoard. Relationship types (uses, targets, indicates, attributed-to) задают словарь для типов рёбер. Python-библиотека `stix2` (PyPI) — зрелая, с immutable объектами и валидацией. **OCSF** лучше подходит для **нормализации событий** (Authentication, DNS Activity, Network Activity), а не для типизации сущностей. Объекты OCSF (user, device, process) могут служить node_type, но event classes — скорее шаблоны для фактов/рёбер. Python-библиотека `ocsf-lib-py` существует, но менее зрелая. **Рекомендация**: STIX SDO/SCO для entity types, OCSF event classes для event normalization — два стандарта комплементарны.
+**STIX 2.1** — готовый к использованию граф-ориентированный стандарт. SDO (Attack Pattern, Threat Actor, Malware, Campaign, Vulnerability и др.) и SCO (IPv4-Addr, Domain-Name, Email-Addr, File, Process, User-Account и др.) **идеально подходят как значения node_type** в AgentPinBoard. Relationship types (uses, targets, indicates, attributed-to) задают словарь для типов рёбер. Python-библиотека `stix2` (PyPI) — зрелая, с immutable объектами и валидацией. **OCSF** лучше подходит для **нормализации событий** (Authentication, DNS Activity, Network Activity), а не для типизации сущностей. Объекты OCSF (user, device, process) могут служить node_type, но event classes — скорее шаблоны для фактов/рёбер. Python-библиотека `ocsf-lib-py` существует, но менее зрелая. **Рекомендация**: STIX SDO/SCO для entity types, OCSF event classes для event normalization — два стандарта комплементарны.
 
 ---
 
 ## E. Итоговая оценка
 
-### Уникальность ниши PinBoard подтверждена
+### Уникальность ниши AgentPinBoard подтверждена
 
-Ни одна из исследованных библиотек не реализует комбинацию трёх ключевых архитектурных решений PinBoard:
+Ни одна из исследованных библиотек не реализует комбинацию трёх ключевых архитектурных решений AgentPinBoard:
 
 1. **Декларативные Fact-аннотации** (`Annotated[T, Fact(node_type="...", role="...", normalizer=...)]`) — ни Graphiti, ни Mem0, ни Cognee не используют аннотации на полях Pydantic-моделей для определения, какое поле становится нодой. Cognee использует Pydantic DataPoint, но для LLM-extraction, не для декларативной разметки существующих моделей.
 
-2. **Side-effect декоратор `@fact`** — во всех конкурентах memory API вызывается явно (`graphiti.add_episode()`, `memory.add()`, `cognee.add()`). PinBoard's подход — прозрачное извлечение фактов при вызове тула без изменения return value — не имеет аналогов.
+2. **Side-effect декоратор `@pin`** — во всех конкурентах memory API вызывается явно (`graphiti.add_episode()`, `memory.add()`, `cognee.add()`). AgentPinBoard's подход — прозрачное извлечение фактов при вызове тула без изменения return value — не имеет аналогов.
 
-3. **Session-scoped граф без LLM-extraction** — все конкуренты либо персистентны (Graphiti, Mem0, Cognee), либо используют LLM для извлечения. PinBoard делает extraction детерминированным и привязанным к сессии.
+3. **Session-scoped граф без LLM-extraction** — все конкуренты либо персистентны (Graphiti, Mem0, Cognee), либо используют LLM для извлечения. AgentPinBoard делает extraction детерминированным и привязанным к сессии.
 
 ### Десять рисков дизайна, которые необходимо адресовать
 
-**1. Temporal invalidation.** Graphiti реализует bi-temporal модель с valid_at/invalid_at — критически важно для security use cases, где IP может быть скомпрометирован в определённый период. PinBoard не имеет механизма инвалидации фактов при получении противоречащей информации.
+**1. Temporal invalidation.** Graphiti реализует bi-temporal модель с valid_at/invalid_at — критически важно для security use cases, где IP может быть скомпрометирован в определённый период. AgentPinBoard не имеет механизма инвалидации фактов при получении противоречащей информации.
 
 **2. Обработка противоречивых фактов.** Когда два тула возвращают конфликтующую информацию об одной сущности (например, разные GeoIP-данные), граф молча содержит оба факта. Нужна хотя бы стратегия last-write-wins или confidence scoring.
 
@@ -137,15 +137,15 @@ IBM i2 Analyst's Notebook задаёт методологию **ELP (Entity-Link
 
 **8. Offline/async enrichment.** Letta's sleep-time compute и MAGMA's dual-stream write показывают, что async обогащение (глубокая обработка в фоне, пока агент работает) — зрелый паттерн, повышающий responsiveness.
 
-**9. Multi-hop query support.** HippoRAG демонстрирует, что Personalized PageRank для multi-hop retrieval **на 20% лучше** чистого vector search. `find_path` и `explore` в PinBoard покрывают basic traversal, но нужен механизм ранжирования путей по relevance.
+**9. Multi-hop query support.** HippoRAG демонстрирует, что Personalized PageRank для multi-hop retrieval **на 20% лучше** чистого vector search. `find_path` и `explore` в AgentPinBoard покрывают basic traversal, но нужен механизм ранжирования путей по relevance.
 
-**10. Provenance и аудит.** Graphiti хранит двунаправленные ссылки episode ↔ fact. PinBoard's `get_evidence` идёт в правильном направлении, но для compliance-сценариев (due diligence, incident response) нужна полная цепочка: tool call → raw response → extracted fact → linked node, с возможностью воспроизведения.
+**10. Provenance и аудит.** Graphiti хранит двунаправленные ссылки episode ↔ fact. AgentPinBoard's `get_evidence` идёт в правильном направлении, но для compliance-сценариев (due diligence, incident response) нужна полная цепочка: tool call → raw response → extracted fact → linked node, с возможностью воспроизведения.
 
 ---
 
-## Заключение: стратегические выводы для проектирования PinBoard
+## Заключение: стратегические выводы для проектирования AgentPinBoard
 
-PinBoard не конкурирует с Graphiti, Mem0 или Cognee напрямую — это **другой architectural tradeoff**: детерминизм и дешевизна extraction за счёт отказа от LLM-гибкости, session scope за счёт отказа от персистентности. Этот tradeoff обоснован для целевых use cases (security investigations, due diligence), где структура данных **известна заранее** (API возвращают Pydantic-модели с фиксированными полями) и LLM-извлечение избыточно.
+AgentPinBoard не конкурирует с Graphiti, Mem0 или Cognee напрямую — это **другой architectural tradeoff**: детерминизм и дешевизна extraction за счёт отказа от LLM-гибкости, session scope за счёт отказа от персистентности. Этот tradeoff обоснован для целевых use cases (security investigations, due diligence), где структура данных **известна заранее** (API возвращают Pydantic-модели с фиксированными полями) и LLM-извлечение избыточно.
 
 Три приоритета на основе анализа prior art: **(1)** Добавить minimal temporal model — хотя бы `created_at` + `source` на каждый факт для аудита; **(2)** Реализовать strategy для context budget — PageRank-based salient node selection + configurable hop depth в explore/graph_summary; **(3)** Расширить entity resolution normalizer-ами для доменных типов (IP normalization, email canonicalization, fuzzy company name matching) — это differentiator, которого нет ни в одном конкуренте в таком декларативном виде.
 

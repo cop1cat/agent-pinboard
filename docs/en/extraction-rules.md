@@ -1,6 +1,6 @@
 # Extraction rules
 
-When `@fact` runs, it walks the validated Pydantic model and applies
+When `@pin` runs, it walks the validated Pydantic model and applies
 five rules to every field. The rules are mutually exclusive — exactly
 one fires per field.
 
@@ -35,7 +35,7 @@ class VTReport(BaseModel):
 FactNode and gets its own edge labelled `VTReport.related_ips`.
 
 If an element is itself a `BaseModel`, `dict`, `tuple`, or `list`,
-`PinBoardExtractionError` is raised — `node()` on a list expects flat
+`AgentPinBoardExtractionError` is raised — `node()` on a list expects flat
 primitives.
 
 ## Rule 4 — nested `BaseModel` (or `list[BaseModel]`) without `node()`
@@ -61,7 +61,7 @@ regardless of which event-model embeds `Actor`.
 `timeline(...)`. Used for things like `event_time`, `latency_ms`, raw
 status codes — values that aren't worth turning into nodes.
 
-## Unsupported shapes (raise `PinBoardExtractionError`)
+## Unsupported shapes (raise `AgentPinBoardExtractionError`)
 
 - `dict[str, BaseModel]` or any dict container in a node-marked field
 - `Union[NodeA, NodeB]` (Union of distinct node types)

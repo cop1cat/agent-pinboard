@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-from datetime import datetime, timezone
 from typing import Annotated
 
 import pytest
@@ -14,20 +12,18 @@ from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-from pinboard import (
+from agent_pinboard import (
+    AgentPinBoardConfigError,
+    AgentPinBoardValidationError,
     Direction,  # noqa: F401  re-export check
     Entity,
     OnDuplicate,
-    PinBoardConfigError,
-    PinBoardValidationError,
-    fact,
     node,
+    pin,
 )
-from pinboard import store as store_io
-from pinboard.session import get_or_load_session
-
+from agent_pinboard import store as store_io
+from agent_pinboard.session import get_or_load_session
 from tests._helpers import call, make_runner
-
 
 # Common entity definitions reused across tests.
 IP = Entity(name="IP", description="ipv4/ipv6")
@@ -45,13 +41,13 @@ class TestStackOrderValidation:
         def plain(x: str) -> str:
             return x
 
-        with pytest.raises(PinBoardConfigError, match="ABOVE @tool"):
-            fact(model=CloudTrailEvent)(plain)
+        with pytest.raises(AgentPinBoardConfigError, match="ABOVE @tool"):
+            pin(model=CloudTrailEvent)(plain)
 
 
 class TestSyncBasicIngestion:
     def test_one_call_creates_event_and_facts(self, store: InMemoryStore) -> None:
-        @fact(model=CloudTrailEvent)
+        @pin(model=CloudTrailEvent)
         @tool
         def fetch(value: str, runtime: ToolRuntime) -> dict:
             """Returns one event."""
@@ -70,7 +66,7 @@ class TestSyncBasicIngestion:
 
 class TestManyTrue:
     def test_batch_extraction(self, store: InMemoryStore) -> None:
-        @fact(model=CloudTrailEvent, many=True)
+        @pin(model=CloudTrailEvent, many=True)
         @tool
         def fetch(value: str, runtime: ToolRuntime) -> list[dict]:
             """Batch."""
@@ -87,19 +83,19 @@ class TestManyTrue:
 
 class TestFailLoudOnValidation:
     def test_bad_dict_raises_and_graph_unchanged(self, store: InMemoryStore) -> None:
-        """README §16 AC6 — broken return → PinBoardValidationError, graph empty."""
+        """README §16 AC6 — broken return → AgentPinBoardValidationError, graph empty."""
 
         class StrictModel(BaseModel):
             src_ip: str = node(type=IP, description="src")
 
-        @fact(model=StrictModel)
+        @pin(model=StrictModel)
         @tool
         def fetch(value: str, runtime: ToolRuntime) -> dict:
             """Returns broken payload."""
             return {"unrelated_field": 42}
 
         graph = make_runner([fetch], store)
-        with pytest.raises(PinBoardValidationError):
+        with pytest.raises(AgentPinBoardValidationError):
             call(graph, "fetch", {"value": "x"}, "tid")
         g = get_or_load_session(store, "tid")
         assert list(g.search_by_type("IP")) == []
@@ -110,7 +106,7 @@ class TestDuplicateDetection:
         """README §16 AC5 — second call with same args is skipped."""
         invocations: list[int] = []
 
-        @fact(model=CloudTrailEvent, on_duplicate=OnDuplicate.SKIP)
+        @pin(model=CloudTrailEvent, on_duplicate=OnDuplicate.SKIP)
         @tool
         def fetch(value: str, runtime: ToolRuntime) -> dict:
             """Counted."""
@@ -127,7 +123,7 @@ class TestDuplicateDetection:
     def test_always_runs_each_time(self, store: InMemoryStore) -> None:
         invocations: list[int] = []
 
-        @fact(model=CloudTrailEvent, on_duplicate=OnDuplicate.ALWAYS)
+        @pin(model=CloudTrailEvent, on_duplicate=OnDuplicate.ALWAYS)
         @tool
         def fetch(value: str, runtime: ToolRuntime) -> dict:
             """Counted."""
@@ -145,7 +141,7 @@ class TestDuplicateDetection:
 
 class TestMaskArgs:
     def test_secret_masked_in_log(self, store: InMemoryStore) -> None:
-        @fact(model=CloudTrailEvent, mask_args=["api_key"])
+        @pin(model=CloudTrailEvent, mask_args=["api_key"])
         @tool
         def fetch(value: str, api_key: str, runtime: ToolRuntime) -> dict:
             """Sensitive arg."""
@@ -164,7 +160,7 @@ class _S(TypedDict):
 
 class TestStoreMissing:
     def test_no_store_compile_raises(self) -> None:
-        @fact(model=CloudTrailEvent)
+        @pin(model=CloudTrailEvent)
         @tool
         def fetch(value: str, runtime: ToolRuntime) -> dict:
             """."""
@@ -178,7 +174,7 @@ class TestStoreMissing:
         gb.add_edge("tools", END)
         no_store_graph = gb.compile()  # NO store=
 
-        with pytest.raises(PinBoardConfigError, match="compile"):
+        with pytest.raises(AgentPinBoardConfigError, match="compile"):
             no_store_graph.invoke(
                 {
                     "messages": [
@@ -196,15 +192,15 @@ class TestStoreMissing:
 
 class TestHooksFire:
     def test_on_ingest_complete_called(self, store: InMemoryStore) -> None:
-        from pinboard.hooks import PinBoardHooks
+        from agent_pinboard.hooks import AgentPinBoardHooks
 
         seen: list[int] = []
 
-        class H(PinBoardHooks):
+        class H(AgentPinBoardHooks):
             def on_ingest_complete(self, result):
                 seen.append(result.new_nodes)
 
-        @fact(model=CloudTrailEvent, hooks=H())
+        @pin(model=CloudTrailEvent, hooks=H())
         @tool
         def fetch(value: str, runtime: ToolRuntime) -> dict:
             """."""
@@ -220,7 +216,7 @@ class TestAsyncTool:
     async def test_async_ingestion(self, store: InMemoryStore) -> None:
         from tests._helpers import acall
 
-        @fact(model=CloudTrailEvent)
+        @pin(model=CloudTrailEvent)
         @tool
         async def afetch(value: str, runtime: ToolRuntime) -> dict:
             """Async."""
@@ -228,7 +224,7 @@ class TestAsyncTool:
 
         graph = make_runner([afetch], store, async_mode=True)
         await acall(graph, "afetch", {"value": "v"}, "tid-async")
-        from pinboard.session import aget_or_load_session
+        from agent_pinboard.session import aget_or_load_session
 
         g = await aget_or_load_session(store, "tid-async")
         assert g.find_by_value("IP", "9.9.9.9") is not None
@@ -239,8 +235,8 @@ class TestSyncToolWithAsyncTransform:
         async def transform(raw, result):
             return raw
 
-        with pytest.raises(PinBoardConfigError, match="async response_transform"):
-            @fact(model=CloudTrailEvent, response_transform=transform)
+        with pytest.raises(AgentPinBoardConfigError, match="async response_transform"):
+            @pin(model=CloudTrailEvent, response_transform=transform)
             @tool
             def fetch(value: str, runtime: ToolRuntime) -> dict:
                 """."""
@@ -249,7 +245,7 @@ class TestSyncToolWithAsyncTransform:
 
 class TestResponseTransform:
     def test_overrides_return(self, store: InMemoryStore) -> None:
-        @fact(
+        @pin(
             model=CloudTrailEvent,
             response_transform=lambda raw, result: f"loaded {result.new_nodes} new",
         )

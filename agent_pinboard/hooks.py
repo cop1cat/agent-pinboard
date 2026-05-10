@@ -1,6 +1,6 @@
 """Observability hooks.
 
-PinBoard fires hooks on every graph change. Each call is wrapped in
+AgentPinBoard fires hooks on every graph change. Each call is wrapped in
 ``try/except`` and any exception is logged at ERROR — the hook never
 breaks ingestion.
 
@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import logging
 
-from pinboard.graph import FactGraph
-from pinboard.models import EventId, EventNode, FactEdge, FactNode, IngestResult
+from agent_pinboard.graph import FactGraph
+from agent_pinboard.models import EventId, EventNode, FactEdge, FactNode, IngestResult
 
 logger = logging.getLogger(__name__)
 
 
-class PinBoardHooks:
+class AgentPinBoardHooks:
     """Override any subset of these to observe graph mutations."""
 
     def on_node_added(self, node: FactNode | EventNode) -> None: ...
@@ -33,7 +33,7 @@ class PinBoardHooks:
     def on_graph_changed(self, graph: FactGraph) -> None: ...
 
 
-class LoggingHook(PinBoardHooks):
+class LoggingHook(AgentPinBoardHooks):
     """Emit a log line for every event. Useful while wiring an agent up."""
 
     def __init__(self, *, level: int = logging.INFO) -> None:
@@ -64,10 +64,10 @@ class LoggingHook(PinBoardHooks):
         )
 
 
-class CompositeHook(PinBoardHooks):
+class CompositeHook(AgentPinBoardHooks):
     """Forward each callback to a list of underlying hooks, in order."""
 
-    def __init__(self, hooks: list[PinBoardHooks]) -> None:
+    def __init__(self, hooks: list[AgentPinBoardHooks]) -> None:
         self._hooks = list(hooks)
 
     def on_node_added(self, node: FactNode | EventNode) -> None:
@@ -98,7 +98,7 @@ def _safe_call(fn, *args) -> None:
         logger.error("hook %s failed", getattr(fn, "__qualname__", fn), exc_info=True)
 
 
-def fire(hooks: PinBoardHooks | None, method: str, *args) -> None:
+def fire(hooks: AgentPinBoardHooks | None, method: str, *args) -> None:
     """Invoke a hook method by name with the log-and-continue contract."""
     if hooks is None:
         return
@@ -108,4 +108,4 @@ def fire(hooks: PinBoardHooks | None, method: str, *args) -> None:
     _safe_call(fn, *args)
 
 
-__all__ = ["CompositeHook", "LoggingHook", "PinBoardHooks", "fire"]
+__all__ = ["CompositeHook", "LoggingHook", "AgentPinBoardHooks", "fire"]

@@ -1,7 +1,7 @@
 # Examples
 
 Two complete walkthroughs: a security investigation (the canonical
-PinBoard use case) and a non-security one (due-diligence-style company
+AgentPinBoard use case) and a non-security one (due-diligence-style company
 lookup) to make the domain-neutrality concrete.
 
 Both examples use mock tools instead of real APIs, so you can copy and
@@ -25,7 +25,7 @@ def canonical_arn(v: str) -> str:
     return v.strip()
 
 # entities.py
-from pinboard import Entity
+from agent_pinboard import Entity
 
 IP = Entity(
     name="IP",
@@ -53,7 +53,7 @@ Resource = Entity(
 ```python
 from datetime import datetime
 from pydantic import BaseModel, Field
-from pinboard import node
+from agent_pinboard import node
 
 class Actor(BaseModel):
     user_arn: str | None = node(
@@ -93,9 +93,9 @@ class VTReport(BaseModel):
 from datetime import datetime, timezone
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
-from pinboard import fact, OnDuplicate
+from agent_pinboard import pin, OnDuplicate
 
-@fact(model=CloudTrailEvent, many=True)
+@pin(model=CloudTrailEvent, many=True)
 @tool
 def fetch_cloudtrail(user_arn: str, runtime: ToolRuntime) -> list[dict]:
     """Fetch the user's recent CloudTrail events."""
@@ -117,7 +117,7 @@ def fetch_cloudtrail(user_arn: str, runtime: ToolRuntime) -> list[dict]:
         },
     ]
 
-@fact(model=VTReport, on_duplicate=OnDuplicate.SKIP)
+@pin(model=VTReport, on_duplicate=OnDuplicate.SKIP)
 @tool
 def vt_lookup(value: str, runtime: ToolRuntime) -> dict:
     """Check an IP/domain in VirusTotal. SKIP duplicates: no point checking twice."""
@@ -140,7 +140,7 @@ from langgraph.prebuilt import ToolNode
 from langgraph.store.memory import InMemoryStore
 from typing_extensions import TypedDict
 
-from pinboard import LoggingHook, make_graph_tools
+from agent_pinboard import LoggingHook, make_graph_tools
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]
@@ -206,7 +206,7 @@ Same library, no security in sight: a "company lookup" agent.
 ### Entities
 
 ```python
-from pinboard import Entity
+from agent_pinboard import Entity
 
 Company = Entity(
     name="Company",
@@ -229,7 +229,7 @@ Address = Entity(
 
 ```python
 from pydantic import BaseModel, Field
-from pinboard import node, fact
+from agent_pinboard import node, pin
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
 
@@ -251,7 +251,7 @@ class DirectorOtherCompanies(BaseModel):
         default_factory=list,
     )
 
-@fact(model=CompanyRecord)
+@pin(model=CompanyRecord)
 @tool
 def lookup_company(inn: str, runtime: ToolRuntime) -> dict:
     """Look up a company by its registry number."""
@@ -262,7 +262,7 @@ def lookup_company(inn: str, runtime: ToolRuntime) -> dict:
         "address": "  221B Baker Street, London  ",
     }
 
-@fact(model=DirectorOtherCompanies)
+@pin(model=DirectorOtherCompanies)
 @tool
 def director_other_companies(name: str, runtime: ToolRuntime) -> dict:
     """List other companies where this director appears."""
@@ -284,12 +284,12 @@ which tool surfaced it.
 
 ```python
 from typing import override
-from pinboard import PinBoardHooks
-from pinboard.models import EventId, FactNode
+from agent_pinboard import AgentPinBoardHooks
+from agent_pinboard.models import EventId, FactNode
 
 KNOWN_BAD = {"185.220.101.42", "45.77.0.1"}
 
-class BadIPAlerter(PinBoardHooks):
+class BadIPAlerter(AgentPinBoardHooks):
     @override
     def on_link_found(self, existing: FactNode, event_id: EventId) -> None:
         if existing.node_type == "IP" and existing.value in KNOWN_BAD:
@@ -304,15 +304,15 @@ Use it for live alerting without spending tokens on the LLM.
 
 ## Example 4 — Async tools
 
-`@fact` works identically with async tools.
+`@pin` works identically with async tools.
 
 ```python
 import httpx
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
-from pinboard import fact
+from agent_pinboard import pin
 
-@fact(model=VTReport, on_duplicate=OnDuplicate.SKIP)
+@pin(model=VTReport, on_duplicate=OnDuplicate.SKIP)
 @tool
 async def vt_lookup(value: str, runtime: ToolRuntime) -> dict:
     """Async VirusTotal lookup."""
@@ -323,7 +323,7 @@ async def vt_lookup(value: str, runtime: ToolRuntime) -> dict:
 
 The decorator detects async via `inspect.iscoroutinefunction` and wires
 the matching async pipeline. You can mix sync and async tools in one
-agent — PinBoard handles each appropriately.
+agent — AgentPinBoard handles each appropriately.
 
 ## Example 5 — Full LangGraph agent with a mock LLM
 
@@ -342,32 +342,32 @@ uv run python examples/agent_demo.py
 To swap in a real LLM, replace `MockChatModel` with any LangChain
 `BaseChatModel` — e.g. `ChatOpenAI(base_url="http://localhost:11434/v1", model="qwen2.5:7b")`
 for a local Ollama setup, or `ChatOpenAI(model="gpt-4o-mini")` for
-OpenAI. The PinBoard side is identical.
+OpenAI. The AgentPinBoard side is identical.
 
 ## Example 6 — LangfuseHook with Mermaid visualization
 
 ```python
 from langfuse import Langfuse
-from pinboard.integrations.langfuse_hook import LangfuseHook
+from agent_pinboard.integrations.langfuse_hook import LangfuseHook
 
 client = Langfuse(public_key="pk-…", secret_key="sk-…", host="https://cloud.langfuse.com")
 
 hooks = LangfuseHook(client, max_facts_in_snapshot=20)
 
-@fact(model=CloudTrailEvent, many=True, hooks=hooks)
+@pin(model=CloudTrailEvent, many=True, hooks=hooks)
 @tool
 def fetch_cloudtrail(...): ...
 ```
 
 Each call to `fetch_cloudtrail` emits:
 
-* `pinboard.ingest` span — quantitative summary of the ingest.
-* `pinboard.graph_snapshot` span — current graph as a Mermaid
+* `agent_pinboard.ingest` span — quantitative summary of the ingest.
+* `agent_pinboard.graph_snapshot` span — current graph as a Mermaid
   flowchart in metadata. Langfuse renders the Mermaid inline.
 
 The Mermaid renderer is also exported standalone for ad-hoc debugging:
 
 ```python
-from pinboard.integrations.langfuse_hook import render_mermaid
+from agent_pinboard.integrations.langfuse_hook import render_mermaid
 print(render_mermaid(my_factgraph, max_facts=15))
 ```

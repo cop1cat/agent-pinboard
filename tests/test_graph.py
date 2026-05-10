@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from pinboard import (
+from agent_pinboard import (
+    AgentPinBoardNormalizerError,
     Entity,
     EventNode,
     FactEdge,
     FactGraph,
     FactNode,
-    PinBoardNormalizerError,
 )
 
 
@@ -20,7 +20,7 @@ def _ip_entity(normalizer=None) -> Entity:
 
 
 def _make_event(tool: str = "fetch", eid: str = "e-1") -> EventNode:
-    return EventNode(id=eid, source_tool=tool, timestamp=datetime.now(timezone.utc))
+    return EventNode(id=eid, source_tool=tool, timestamp=datetime.now(UTC))
 
 
 class TestUpsertFact:
@@ -74,7 +74,7 @@ class TestUpsertFact:
             raise ValueError("kaboom")
 
         e = Entity(name="IP", description="ip", normalizer=boom)
-        with pytest.raises(PinBoardNormalizerError):
+        with pytest.raises(AgentPinBoardNormalizerError):
             g.upsert_fact(e, "x", ev.id, "t")
 
     def test_empty_canonical_dropped_with_warning(

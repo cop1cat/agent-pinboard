@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from pinboard import EventNode, FactEdge, FactNode, IngestResult, ToolCallRecord
-from pinboard.models import EVENT_NODE_TYPE, fact_node_id
+from agent_pinboard import EventNode, FactEdge, FactNode, IngestResult, ToolCallRecord
+from agent_pinboard.models import EVENT_NODE_TYPE, fact_node_id
 
 
 class TestFactNodeId:
@@ -40,13 +40,13 @@ class TestFactEdge:
 
 class TestEventNode:
     def test_default_node_type(self) -> None:
-        e = EventNode(id="x", source_tool="t", timestamp=datetime.now(timezone.utc))
+        e = EventNode(id="x", source_tool="t", timestamp=datetime.now(UTC))
         assert e.node_type == EVENT_NODE_TYPE
 
 
 class TestFactNodeShape:
     def test_defaults(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         n = FactNode(
             id="abc",
             node_type="IP",
@@ -71,7 +71,7 @@ class TestToolCallRecordFrozen:
         r = ToolCallRecord(
             tool_name="t",
             args_repr="{}",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             event_id="e",
             summary="ok",
             duration_ms=1,

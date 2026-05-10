@@ -1,6 +1,6 @@
 """Sharded persistence layer over LangGraph ``BaseStore``.
 
-The graph is split across four namespaces under ``("pinboard", thread_id, ...)``:
+The graph is split across four namespaces under ``("agent_pinboard", thread_id, ...)``:
 
 * ``"nodes"`` — one key per ``FactNode`` / ``EventNode``.
 * ``"edges"`` — one key per ``FactEdge``.
@@ -16,9 +16,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from pinboard.entity import Entity
-from pinboard.graph import FactGraph
-from pinboard.models import (
+from agent_pinboard.entity import Entity
+from agent_pinboard.graph import FactGraph
+from agent_pinboard.models import (
     EVENT_NODE_TYPE,
     EventNode,
     FactEdge,
@@ -41,27 +41,27 @@ _SCAN_LIMIT = 10_000
 # --------------------------------------------------------------------------- #
 
 def _ns_root(thread_id: str) -> tuple[str, ...]:
-    return ("pinboard", thread_id)
+    return ("agent_pinboard", thread_id)
 
 
 def _ns_nodes(thread_id: str) -> tuple[str, ...]:
-    return ("pinboard", thread_id, "nodes")
+    return ("agent_pinboard", thread_id, "nodes")
 
 
 def _ns_edges(thread_id: str) -> tuple[str, ...]:
-    return ("pinboard", thread_id, "edges")
+    return ("agent_pinboard", thread_id, "edges")
 
 
 def _ns_entities(thread_id: str) -> tuple[str, ...]:
-    return ("pinboard", thread_id, "entities")
+    return ("agent_pinboard", thread_id, "entities")
 
 
 def _ns_tool_calls(thread_id: str) -> tuple[str, ...]:
-    return ("pinboard", thread_id, "tool_calls")
+    return ("agent_pinboard", thread_id, "tool_calls")
 
 
 def _ns_raw_events(thread_id: str) -> tuple[str, ...]:
-    return ("pinboard", thread_id, "raw_events")
+    return ("agent_pinboard", thread_id, "raw_events")
 
 
 # --------------------------------------------------------------------------- #

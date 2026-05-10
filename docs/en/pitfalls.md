@@ -5,22 +5,22 @@ hour-long debug sessions if you don't know the answer in advance.
 
 ## 1. Decorator order
 
-**`@fact` always above `@tool`.**
+**`@pin` always above `@tool`.**
 
 ```python
 # ✓ correct
-@fact(model=X)
+@pin(model=X)
 @tool
 def f(...): ...
 
-# ✗ raises PinBoardConfigError at decoration time
+# ✗ raises AgentPinBoardConfigError at decoration time
 @tool
-@fact(model=X)
+@pin(model=X)
 def f(...): ...
 ```
 
-`@tool` produces a `BaseTool`; `@fact` then wraps it. Reverse the order
-and `@fact` receives a function instead of a Tool — the spec rejects
+`@tool` produces a `BaseTool`; `@pin` then wraps it. Reverse the order
+and `@pin` receives a function instead of a Tool — the spec rejects
 this immediately so you don't get a confusing traceback later.
 
 ## 2. `node()` vs `Field()`
@@ -36,7 +36,7 @@ Quick rule:
 
 ## 3. Two `Entity` instances with the same name
 
-PinBoard's session registry is keyed by `Entity.name`. If two pieces
+AgentPinBoard's session registry is keyed by `Entity.name`. If two pieces
 of code create `Entity(name="IP", ...)` independently — even with
 identical attributes — you'll get a warning and the first registration
 wins.
@@ -65,7 +65,7 @@ class Bad(BaseModel):
     inner: Inner = node(type=SomeEntity, description="...")  # rejected
 ```
 
-This is rejected at `register_model` time with `PinBoardConfigError`.
+This is rejected at `register_model` time with `AgentPinBoardConfigError`.
 A `BaseModel` is a structured value, not a leaf — turning it into a
 node would be semantically wrong (and would silently fall through to
 Rule 4 in older versions). If you want `Inner.x` to be a node, mark
@@ -92,9 +92,9 @@ directly, no graph traversal needed.
 graph = builder.compile()  # ✗ no store=
 ```
 
-Every `@fact` invocation needs `runtime.store` to be set, which only
+Every `@pin` invocation needs `runtime.store` to be set, which only
 happens when you call `.compile(store=...)`. Without it the first tool
-invocation raises `PinBoardConfigError("graph must be compiled with .compile(store=...)")`.
+invocation raises `AgentPinBoardConfigError("graph must be compiled with .compile(store=...)")`.
 
 ```python
 from langgraph.store.memory import InMemoryStore
@@ -103,7 +103,7 @@ graph = builder.compile(store=InMemoryStore())  # ✓
 
 ## 8. Missing `thread_id`
 
-If `runtime.config.configurable.thread_id` is unset, PinBoard generates
+If `runtime.config.configurable.thread_id` is unset, AgentPinBoard generates
 a fresh UUID4 per call and warns. Two parallel "anonymous" calls each
 get their own session — they will not see each other's data.
 
@@ -122,12 +122,12 @@ graph.invoke(
 Both work:
 
 ```python
-@fact(model=CloudTrailEvent, many=True)
+@pin(model=CloudTrailEvent, many=True)
 @tool
 def fetch(...) -> list[dict]:
     return [{"src_ip": "1.1.1.1"}, ...]    # validated via model_validate
 
-@fact(model=CloudTrailEvent, many=True)
+@pin(model=CloudTrailEvent, many=True)
 @tool
 def fetch(...) -> list[CloudTrailEvent]:
     return [CloudTrailEvent(src_ip="1.1.1.1"), ...]  # validation skipped

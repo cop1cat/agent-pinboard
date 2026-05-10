@@ -19,18 +19,16 @@ from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-import pinboard
-from pinboard import (
+import agent_pinboard
+from agent_pinboard import (
+    AgentPinBoardConfigError,
+    AgentPinBoardHooks,
     Direction,
     Entity,
-    PinBoardConfigError,
-    PinBoardHooks,
-    fact,
     make_graph_tools,
     node,
+    pin,
 )
-from pinboard.session import get_or_load_session
-
 
 IP = Entity(name="IP", description="ipv4/ipv6", normalizer=lambda v: str(v).lower())
 User = Entity(name="User", description="acting principal")
@@ -83,13 +81,13 @@ def _call(graph, name: str, args: dict, thread_id: str = "tid", call_id: str = "
 def test_b1_explore_depth_traverses_multi_hop(store: InMemoryStore) -> None:
     """Depth=2 must reach facts that share an event with a directly-related fact."""
 
-    @fact(model=CTEvent)
+    @pin(model=CTEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
         return {"src_ip": "1.1.1.1", "dst_ip": "2.2.2.2"}
 
-    @fact(model=CTEvent)
+    @pin(model=CTEvent)
     @tool
     def other(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -110,7 +108,7 @@ def test_b1_explore_depth_traverses_multi_hop(store: InMemoryStore) -> None:
 
 
 def test_b1_explore_depth_zero_is_just_start(store: InMemoryStore) -> None:
-    @fact(model=CTEvent)
+    @pin(model=CTEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -127,7 +125,7 @@ def test_b1_explore_depth_zero_is_just_start(store: InMemoryStore) -> None:
 def test_b1_explore_direction_with_events_visible(store: InMemoryStore) -> None:
     """direction=IN with skip_events=False follows the inverse of edges."""
 
-    @fact(model=CTEvent)
+    @pin(model=CTEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -159,11 +157,11 @@ def test_b1_explore_direction_with_events_visible(store: InMemoryStore) -> None:
 def test_b2_on_link_found_fires(store: InMemoryStore) -> None:
     seen_links: list[str] = []
 
-    class H(PinBoardHooks):
+    class H(AgentPinBoardHooks):
         def on_link_found(self, existing, event_id):
             seen_links.append(existing.value)
 
-    @fact(model=CTEvent, hooks=H())
+    @pin(model=CTEvent, hooks=H())
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -182,7 +180,7 @@ def test_b2_on_link_found_fires(store: InMemoryStore) -> None:
 def test_b3_what_have_i_done_normalises_value(store: InMemoryStore) -> None:
     """Filter should match by canonical form, not by raw display string."""
 
-    @fact(model=CTEvent)
+    @pin(model=CTEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -211,8 +209,8 @@ def test_b4_node_on_basemodel_field_raises_at_registration() -> None:
     class Bad(BaseModel):
         inner: Inner = node(type=Person, description="nope", default_factory=Inner)
 
-    with pytest.raises(PinBoardConfigError, match="BaseModel"):
-        @fact(model=Bad)
+    with pytest.raises(AgentPinBoardConfigError, match="BaseModel"):
+        @pin(model=Bad)
         @tool
         def t(value: str, runtime: ToolRuntime) -> dict:
             """."""
@@ -228,17 +226,17 @@ def test_b6_linked_nodes_dedup(store: InMemoryStore) -> None:
 
     captured: list[int] = []
 
-    class H(PinBoardHooks):
+    class H(AgentPinBoardHooks):
         def on_ingest_complete(self, result):
             captured.append(result.linked_nodes)
 
-    @fact(model=CTEvent, hooks=H())
+    @pin(model=CTEvent, hooks=H())
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
         return {"src_ip": "1.1.1.1"}
 
-    @fact(model=CTEvent, hooks=H())
+    @pin(model=CTEvent, hooks=H())
     @tool
     def repeat(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -257,7 +255,7 @@ def test_b6_linked_nodes_dedup(store: InMemoryStore) -> None:
 # --------------------------------------------------------------------------- #
 
 def test_b9_no_dead_helper() -> None:
-    from pinboard import extract as ex_mod
+    from agent_pinboard import extract as ex_mod
     assert not hasattr(ex_mod, "_check_unsupported_dict")
 
 
@@ -266,7 +264,7 @@ def test_b9_no_dead_helper() -> None:
 # --------------------------------------------------------------------------- #
 
 def test_s1_no_phantom_hook_exports() -> None:
-    from pinboard import hooks as hmod
+    from agent_pinboard import hooks as hmod
     assert not hasattr(hmod, "LangfuseHook")
     assert not hasattr(hmod, "WebSocketHook")
 
@@ -276,8 +274,8 @@ def test_s1_no_phantom_hook_exports() -> None:
 # --------------------------------------------------------------------------- #
 
 def test_public_api_intact() -> None:
-    for name in pinboard.__all__:
-        assert hasattr(pinboard, name), name
+    for name in agent_pinboard.__all__:
+        assert hasattr(agent_pinboard, name), name
 
 
 # --------------------------------------------------------------------------- #
@@ -293,8 +291,7 @@ def test_register_model_basemodel_field_logs_or_raises(caplog: pytest.LogCapture
     class Bad(BaseModel):
         inner: Inner = node(type=Person, description="nope", default_factory=Inner)
 
-    from pinboard.registry import register_model
+    from agent_pinboard.registry import register_model
 
-    with caplog.at_level(logging.WARNING):
-        with pytest.raises(PinBoardConfigError):
-            register_model(Bad)
+    with caplog.at_level(logging.WARNING), pytest.raises(AgentPinBoardConfigError):
+        register_model(Bad)

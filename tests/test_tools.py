@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Annotated
 
-import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, START, StateGraph
@@ -12,8 +11,7 @@ from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-from pinboard import Entity, fact, make_graph_tools, node
-
+from agent_pinboard import Entity, make_graph_tools, node, pin
 
 IP = Entity(name="IP", description="ipv4/ipv6 address")
 User = Entity(name="User", description="acting principal")
@@ -30,7 +28,7 @@ class State(TypedDict):
 
 
 def _build_graph(extra_tools, store):
-    @fact(model=CloudTrailEvent)
+    @pin(model=CloudTrailEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """Returns one event."""

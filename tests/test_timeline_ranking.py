@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Annotated
 
-import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, START, StateGraph
@@ -14,8 +13,7 @@ from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
-from pinboard import Entity, fact, make_graph_tools, node
-
+from agent_pinboard import Entity, make_graph_tools, node, pin
 
 IP = Entity(name="IP", description="ip")
 User = Entity(name="User", description="u")
@@ -52,7 +50,7 @@ def _call(graph, name, args, *, call_id="c"):
     return out["messages"][-1].content
 
 
-@fact(model=CTEvent)
+@pin(model=CTEvent)
 @tool
 def fetch(scenario: str, runtime: ToolRuntime) -> dict:
     """."""
@@ -104,8 +102,8 @@ class TestTimelineRanking:
 class TestArigraphScoreFormula:
     def test_zero_for_event_with_no_overlap(self, store: InMemoryStore) -> None:
         """An event with no neighbour overlap scores 0."""
-        from pinboard.session import get_or_load_session
-        from pinboard.tools import _arigraph_score_events
+        from agent_pinboard.session import get_or_load_session
+        from agent_pinboard.tools import _arigraph_score_events
 
         graph = _build([fetch, *make_graph_tools()], store)
         _call(graph, "fetch", {"scenario": "ip-with-actor"}, call_id="a")

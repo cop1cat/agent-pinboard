@@ -11,8 +11,7 @@ from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
-from pinboard import Entity, fact, make_graph_tools, node
-
+from agent_pinboard import Entity, make_graph_tools, node, pin
 
 IP = Entity(name="IP", description="ipv4/ipv6 address")
 User = Entity(name="User", description="acting principal")
@@ -49,7 +48,7 @@ def _call(graph, name, args, *, call_id="c"):
     return out["messages"][-1].content
 
 
-@fact(model=Event)
+@pin(model=Event)
 @tool
 def fetch(value: str, runtime: ToolRuntime) -> dict:
     """."""

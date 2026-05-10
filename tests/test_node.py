@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel
 
-from pinboard import Entity, PinBoardConfigError, node
-from pinboard.fields import META_KEY, field_entity
+from agent_pinboard import AgentPinBoardConfigError, Entity, node
+from agent_pinboard.fields import META_KEY, field_entity
 
 
 @pytest.fixture
@@ -14,15 +14,15 @@ def IP() -> Entity:
 
 class TestNodeFactoryValidation:
     def test_string_type_rejected(self, IP: Entity) -> None:
-        with pytest.raises(PinBoardConfigError, match="Entity instance"):
+        with pytest.raises(AgentPinBoardConfigError, match="Entity instance"):
             node(type="IP", description="src ip")  # type: ignore[arg-type]
 
     def test_empty_description_rejected(self, IP: Entity) -> None:
-        with pytest.raises(PinBoardConfigError, match="description"):
+        with pytest.raises(AgentPinBoardConfigError, match="description"):
             node(type=IP, description="")
 
     def test_whitespace_description_rejected(self, IP: Entity) -> None:
-        with pytest.raises(PinBoardConfigError, match="description"):
+        with pytest.raises(AgentPinBoardConfigError, match="description"):
             node(type=IP, description="   ")
 
 

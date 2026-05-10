@@ -2,11 +2,11 @@
 
 ## Установка
 
-PinBoard пока не на PyPI. Ставьте из исходников:
+AgentPinBoard пока не на PyPI. Ставьте из исходников:
 
 ```bash
 git clone <repo>
-cd pinboard
+cd agent_pinboard
 uv sync
 ```
 
@@ -30,7 +30,7 @@ from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
-from pinboard import Entity, fact, make_graph_tools, node
+from agent_pinboard import Entity, pin, make_graph_tools, node
 
 # 1. Объявляем тип сущности. Описывает, какого рода вещь — нода.
 IP = Entity(
@@ -43,8 +43,8 @@ IP = Entity(
 class FetchResult(BaseModel):
     src_ip: str = node(type=IP, description="IP from which the call was made")
 
-# 3. Декорируем тул. @fact ВСЕГДА выше @tool.
-@fact(model=FetchResult)
+# 3. Декорируем тул. @pin ВСЕГДА выше @tool.
+@pin(model=FetchResult)
 @tool
 def fetch(query: str, runtime: ToolRuntime) -> dict:
     """Pretend to call an upstream API."""
@@ -93,11 +93,11 @@ IP сохранён под канонической формой (`192.168.1.1`)
 
 ## Что произошло
 
-1. `@fact(model=FetchResult)` применён к тулу `fetch`. На этапе
-   декорирования PinBoard просканировал модель и зарегистрировал
+1. `@pin(model=FetchResult)` применён к тулу `fetch`. На этапе
+   декорирования AgentPinBoard просканировал модель и зарегистрировал
    `Entity` IP в session-registry.
 2. Первый вызов `fetch` вернул `{"src_ip": "192.168.001.001"}`.
-   PinBoard прогнал через `FetchResult.model_validate`, создал
+   AgentPinBoard прогнал через `FetchResult.model_validate`, создал
    `EventNode` для вызова, прогнал значение через `IP.normalizer`
    (`canonical_ip`), создал одну `FactNode` типа `IP`.
 3. `graph_summary` показывает все известные типы (из registry) +

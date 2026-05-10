@@ -1,4 +1,4 @@
-"""Live PinBoard demo with WebSocket streaming.
+"""Live AgentPinBoard demo with WebSocket streaming.
 
 Run::
 
@@ -17,38 +17,34 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Allow `from examples.agent_demo import MockChatModel` from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from examples.agent_demo import (  # noqa: E402
-    IP,
-    Actor,
-    CloudTrailEvent,
-    MockChatModel,
-    User,
-    VTReport,
-)
 from langchain.agents import create_agent  # noqa: E402
 from langchain_core.tools import tool  # noqa: E402
 from langgraph.prebuilt import ToolRuntime  # noqa: E402
 from langgraph.store.memory import InMemoryStore  # noqa: E402
 
-from pinboard import fact, make_graph_tools  # noqa: E402
-from pinboard.integrations.websocket_hook import (  # noqa: E402
+from agent_pinboard import make_graph_tools, pin  # noqa: E402
+from agent_pinboard.integrations.websocket_hook import (  # noqa: E402
     WebSocketHook,
     serve_websocket,
 )
+from examples.agent_demo import (  # noqa: E402
+    CloudTrailEvent,
+    MockChatModel,
+    VTReport,
+)
 
-
-# Hook is shared between @fact tools and make_graph_tools — every change
+# Hook is shared between @pin tools and make_graph_tools — every change
 # to the graph (extraction, link-found, summary) flows into the WS queue.
 HOOK = WebSocketHook(thread_id_label="demo-live")
 
 
-@fact(model=CloudTrailEvent, many=True, hooks=HOOK)
+@pin(model=CloudTrailEvent, many=True, hooks=HOOK)
 @tool
 def fetch_cloudtrail(user_arn: str, runtime: ToolRuntime) -> list[dict]:
     """Mock CloudTrail fetch."""
@@ -57,18 +53,18 @@ def fetch_cloudtrail(user_arn: str, runtime: ToolRuntime) -> list[dict]:
             "src_ip": "185.220.101.42",
             "actor": {"user_arn": user_arn},
             "action_name": "AssumeRole",
-            "event_time": datetime.now(timezone.utc).isoformat(),
+            "event_time": datetime.now(UTC).isoformat(),
         },
         {
             "src_ip": "185.220.101.42",
             "actor": {"user_arn": user_arn},
             "action_name": "ListBuckets",
-            "event_time": datetime.now(timezone.utc).isoformat(),
+            "event_time": datetime.now(UTC).isoformat(),
         },
     ]
 
 
-@fact(model=VTReport, hooks=HOOK)
+@pin(model=VTReport, hooks=HOOK)
 @tool
 def vt_lookup(value: str, runtime: ToolRuntime) -> dict:
     """Mock VirusTotal lookup."""

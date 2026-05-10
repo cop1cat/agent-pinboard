@@ -2,11 +2,11 @@
 
 `make_graph_tools()` returns five LangChain tools for the LLM agent to
 read the graph. They are stateless and stable across calls — register
-them alongside your `@fact`-decorated tools and the agent uses them
+them alongside your `@pin`-decorated tools and the agent uses them
 naturally.
 
 ```python
-from pinboard import make_graph_tools
+from agent_pinboard import make_graph_tools
 
 tools = [my_fetch_tool, *make_graph_tools()]
 ```
@@ -19,7 +19,7 @@ tools = [my_fetch_tool, *make_graph_tools()]
 | `timeline` | 1 | Chronological events in which an entity participated |
 | `what_have_i_done` | 1 | Filter the tool-call log of this session |
 | `find_path` | 2 | Top-N shortest paths between two entities |
-| `get_evidence` | 3 | Raw return JSON for a specific event (requires `@fact(store_raw=True)`) |
+| `get_evidence` | 3 | Raw return JSON for a specific event (requires `@pin(store_raw=True)`) |
 
 ## Suggested LLM workflow
 
@@ -38,7 +38,7 @@ tools = [my_fetch_tool, *make_graph_tools()]
 ## `graph_summary(top_per_type=5)`
 
 Lists every entity type known to the session — both types declared
-through `@fact(model=...)` and types currently present in the graph.
+through `@pin(model=...)` and types currently present in the graph.
 Counts come from the live graph; types with `0 in graph` mean
 "the agent could populate this if it tried".
 
@@ -146,7 +146,7 @@ get_evidence(event_id: str)
 ```
 
 Returns the raw tool return that produced ``event_id`` — only available
-if the producing tool was decorated with ``@fact(store_raw=True)``.
+if the producing tool was decorated with ``@pin(store_raw=True)``.
 Otherwise returns a hint pointing at the EventNode's structured
 ``properties`` (the non-node scalar fields from the parsed model).
 
@@ -214,7 +214,7 @@ what_have_i_done (3 of 7 records):
 All tools return plain text, not JSON. Format is intentionally stable
 and a contract — your agent prompts can rely on the structure. The
 edge `description` from `node()` is **always** rendered next to the
-related fact, since field names alone are not a contract for the LLM.
+related pin, since field names alone are not a contract for the LLM.
 
 ## Empty results — never raise
 

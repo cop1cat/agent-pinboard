@@ -2,10 +2,10 @@
 
 `make_graph_tools()` возвращает пять LangChain-тулов, чтобы LLM-агент
 читал граф. Они stateless и стабильные между вызовами — регистрируйте
-рядом с вашими `@fact`-тулами и агент сам найдёт.
+рядом с вашими `@pin`-тулами и агент сам найдёт.
 
 ```python
-from pinboard import make_graph_tools
+from agent_pinboard import make_graph_tools
 
 tools = [my_fetch_tool, *make_graph_tools()]
 ```
@@ -18,7 +18,7 @@ tools = [my_fetch_tool, *make_graph_tools()]
 | `timeline` | 1 | Хронология событий, в которых участвовала сущность |
 | `what_have_i_done` | 1 | Фильтр tool-call лога текущей сессии |
 | `find_path` | 2 | Top-N кратчайших путей между двумя сущностями |
-| `get_evidence` | 3 | Сырой return JSON для конкретного события (требует `@fact(store_raw=True)`) |
+| `get_evidence` | 3 | Сырой return JSON для конкретного события (требует `@pin(store_raw=True)`) |
 
 ## Рекомендуемый workflow LLM
 
@@ -37,7 +37,7 @@ tools = [my_fetch_tool, *make_graph_tools()]
 ## `graph_summary(top_per_type=5)`
 
 Списком все типы сущностей, известные сессии — и объявленные через
-`@fact(model=...)`, и присутствующие в графе. Счётчики из живого
+`@pin(model=...)`, и присутствующие в графе. Счётчики из живого
 графа; типы с `0 in graph` означают «агент мог бы запросить, но пока
 не делал».
 
@@ -147,7 +147,7 @@ get_evidence(event_id: str)
 ```
 
 Возвращает сырой return тула, породившего ``event_id`` — только если
-тул был декорирован с ``@fact(store_raw=True)``. Иначе — текстовая
+тул был декорирован с ``@pin(store_raw=True)``. Иначе — текстовая
 подсказка с указанием на структурированные ``properties`` EventNode
 (не-node скалярные поля распарсенной модели).
 

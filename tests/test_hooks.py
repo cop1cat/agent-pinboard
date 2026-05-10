@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from pinboard import EventNode, FactEdge, FactGraph, FactNode, IngestResult
-from pinboard.hooks import CompositeHook, LoggingHook, PinBoardHooks, fire
+from agent_pinboard import EventNode, FactEdge, FactGraph, FactNode, IngestResult
+from agent_pinboard.hooks import AgentPinBoardHooks, CompositeHook, LoggingHook, fire
 
 _FactGraph_for_test = FactGraph()
 
 
 def _ev() -> EventNode:
-    return EventNode(id="e", source_tool="t", timestamp=datetime.now(timezone.utc))
+    return EventNode(id="e", source_tool="t", timestamp=datetime.now(UTC))
 
 
 def _fact() -> FactNode:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return FactNode(
         id="n", node_type="IP", value="1.1.1.1", canonical_value="1.1.1.1",
         properties={}, first_seen=now, last_seen=now,
@@ -29,7 +29,7 @@ def _edge() -> FactEdge:
 
 class TestBaseClassNoOp:
     def test_methods_are_noops(self) -> None:
-        h = PinBoardHooks()
+        h = AgentPinBoardHooks()
         h.on_node_added(_fact())
         h.on_edge_added(_edge())
         h.on_link_found(_fact(), "e")
@@ -57,11 +57,11 @@ class TestCompositeHookFanOut:
     def test_calls_each_in_order(self) -> None:
         events: list[str] = []
 
-        class A(PinBoardHooks):
+        class A(AgentPinBoardHooks):
             def on_node_added(self, node):
                 events.append("a")
 
-        class B(PinBoardHooks):
+        class B(AgentPinBoardHooks):
             def on_node_added(self, node):
                 events.append("b")
 
@@ -76,11 +76,11 @@ class TestHookFailureIsolation:
     ) -> None:
         events: list[str] = []
 
-        class Boom(PinBoardHooks):
+        class Boom(AgentPinBoardHooks):
             def on_node_added(self, node):
                 raise RuntimeError("boom")
 
-        class Good(PinBoardHooks):
+        class Good(AgentPinBoardHooks):
             def on_node_added(self, node):
                 events.append("good")
 
@@ -98,7 +98,7 @@ class TestFireHelper:
     def test_routes_to_method_by_name(self) -> None:
         seen: list[FactNode] = []
 
-        class H(PinBoardHooks):
+        class H(AgentPinBoardHooks):
             def on_node_added(self, node):
                 seen.append(node)  # type: ignore[arg-type]
 
@@ -108,7 +108,7 @@ class TestFireHelper:
         assert seen == [f]
 
     def test_swallows_exceptions(self, caplog: pytest.LogCaptureFixture) -> None:
-        class Boom(PinBoardHooks):
+        class Boom(AgentPinBoardHooks):
             def on_node_added(self, node):
                 raise RuntimeError("x")
 

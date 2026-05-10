@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import BaseModel, Field
 
-from pinboard import (
+from agent_pinboard import (
+    AgentPinBoardExtractionError,
+    AgentPinBoardNormalizerError,
     Entity,
     EventNode,
     FactGraph,
-    PinBoardExtractionError,
-    PinBoardNormalizerError,
     node,
 )
-from pinboard.extract import event_properties, extract
+from agent_pinboard.extract import event_properties, extract
 
 
 def _ip(normalizer=None) -> Entity:
@@ -25,7 +25,7 @@ def _user() -> Entity:
 
 
 def _make_event() -> EventNode:
-    return EventNode(id="e-1", source_tool="t", timestamp=datetime.now(timezone.utc))
+    return EventNode(id="e-1", source_tool="t", timestamp=datetime.now(UTC))
 
 
 class TestRule1Primitive:
@@ -86,7 +86,7 @@ class TestRule3ListPrimitives:
         g = FactGraph()
         ev = _make_event()
         g.add_event(ev)
-        with pytest.raises(PinBoardExtractionError):
+        with pytest.raises(AgentPinBoardExtractionError):
             extract(M(ips=[{"a": 1}]), g, ev.id, "t")
 
 
@@ -176,7 +176,7 @@ class TestNormalizerErrorPropagates:
         g = FactGraph()
         ev = _make_event()
         g.add_event(ev)
-        with pytest.raises(PinBoardNormalizerError):
+        with pytest.raises(AgentPinBoardNormalizerError):
             extract(M(x="hi"), g, ev.id, "t")
 
 
@@ -191,7 +191,7 @@ class TestAutolinkAcrossExtractions:
         g = FactGraph()
         ev1 = _make_event()
         ev1.id = "e-1"
-        ev2 = EventNode(id="e-2", source_tool="vt", timestamp=datetime.now(timezone.utc))
+        ev2 = EventNode(id="e-2", source_tool="vt", timestamp=datetime.now(UTC))
         g.add_event(ev1)
         g.add_event(ev2)
 

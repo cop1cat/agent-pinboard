@@ -1,6 +1,6 @@
 # API reference
 
-Every public symbol re-exported from `pinboard`.
+Every public symbol re-exported from `agent_pinboard`.
 
 ## Markers and factories
 
@@ -22,18 +22,18 @@ A frozen value object describing one node type. `name` becomes
 
 ### `node(*, type, description, **field_kwargs) -> FieldInfo`
 
-Factory that returns a Pydantic `FieldInfo` carrying the PinBoard
+Factory that returns a Pydantic `FieldInfo` carrying the AgentPinBoard
 node-marker metadata.
 
 - `type: Entity` — the entity this field's values represent. String
-  or other types raise `PinBoardConfigError`.
+  or other types raise `AgentPinBoardConfigError`.
 - `description: str` — non-empty; describes the field's role in the
-  event. Raises `PinBoardConfigError` if empty.
+  event. Raises `AgentPinBoardConfigError` if empty.
 - `**field_kwargs` — forwarded to `pydantic.Field` (e.g. `default`,
   `default_factory`, `alias`, `ge`).
 
 The annotation of the field must be a primitive (or `list[primitive]`).
-A `BaseModel`-typed field with `node()` raises `PinBoardConfigError`
+A `BaseModel`-typed field with `node()` raises `AgentPinBoardConfigError`
 at `register_model` time.
 
 ## Decorator
@@ -49,7 +49,7 @@ Decorator factory for LangChain tools. **Apply above `@tool`.**
 - `on_duplicate: OnDuplicate` — see enum below.
 - `mask_args: list[str] | None` — parameter names to replace with
   `"***"` in `args_repr`.
-- `hooks: PinBoardHooks | None` — observability sink.
+- `hooks: AgentPinBoardHooks | None` — observability sink.
 - `response_transform: (raw, IngestResult) -> Any` — rewrite the
   tool's return for the LLM. Default keeps the original value.
 
@@ -176,7 +176,7 @@ class FactGraph:
     def from_snapshot(nodes, edges) -> FactGraph
 ```
 
-In normal use you don't construct this — `@fact` and the graph tools
+In normal use you don't construct this — `@pin` and the graph tools
 manage it. It's exported so tests and advanced users can poke at the
 in-memory representation.
 
@@ -190,12 +190,12 @@ Returns the five Phase-1 graph tools: `explore`, `timeline`,
 
 ## Hooks
 
-### `PinBoardHooks`
+### `AgentPinBoardHooks`
 
 Base class with no-op methods — override what you need:
 
 ```python
-class PinBoardHooks:
+class AgentPinBoardHooks:
     def on_node_added(self, node: FactNode | EventNode) -> None: ...
     def on_edge_added(self, edge: FactEdge) -> None: ...
     def on_link_found(self, existing: FactNode, event_id: EventId) -> None: ...
@@ -210,7 +210,7 @@ and swallowed; ingestion never fails because of a hook.
 
 Logs each callback to the standard `logging` module.
 
-### `CompositeHook(hooks: list[PinBoardHooks])`
+### `CompositeHook(hooks: list[AgentPinBoardHooks])`
 
 Fans every callback out to the provided hooks in order.
 
@@ -225,14 +225,14 @@ hard cap.
 ## Exceptions
 
 ```python
-class PinBoardError(Exception): ...
-class PinBoardConfigError(PinBoardError): ...        # decoration / setup error
-class PinBoardValidationError(PinBoardError): ...    # Pydantic validation failed
-class PinBoardNormalizerError(PinBoardError): ...    # Entity.normalizer raised
-class PinBoardExtractionError(PinBoardError): ...    # unsupported field shape
+class AgentPinBoardError(Exception): ...
+class AgentPinBoardConfigError(AgentPinBoardError): ...        # decoration / setup error
+class AgentPinBoardValidationError(AgentPinBoardError): ...    # Pydantic validation failed
+class AgentPinBoardNormalizerError(AgentPinBoardError): ...    # Entity.normalizer raised
+class AgentPinBoardExtractionError(AgentPinBoardError): ...    # unsupported field shape
 ```
 
-Catch the base `PinBoardError` to handle any library-raised failure.
+Catch the base `AgentPinBoardError` to handle any library-raised failure.
 
 ## Internals (not public API, but accessible)
 
@@ -240,13 +240,13 @@ These exist and are sometimes useful for tests or extensions. Do not
 rely on their signatures across versions.
 
 ```python
-from pinboard.registry import known_entities, register_model, _reset
-from pinboard.session import (
+from agent_pinboard.registry import known_entities, register_model, _reset
+from agent_pinboard.session import (
     get_or_load_session, aget_or_load_session,
     lock_for, thread_id_from, _reset as reset_sessions,
 )
-from pinboard import store as store_io        # sync + async I/O
-from pinboard.extract import extract, event_properties
-from pinboard.fields import field_entity, META_KEY
-from pinboard.config import _reset as reset_config
+from agent_pinboard import store as store_io        # sync + async I/O
+from agent_pinboard.extract import extract, event_properties
+from agent_pinboard.fields import field_entity, META_KEY
+from agent_pinboard.config import _reset as reset_config
 ```

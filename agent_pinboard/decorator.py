@@ -1,4 +1,4 @@
-"""``@fact`` — the user-facing entry point.
+"""``@pin`` — the user-facing entry point.
 
 Wraps a LangChain ``BaseTool`` (created by ``@tool``) so that every
 invocation, in addition to its normal return:
@@ -12,8 +12,8 @@ invocation, in addition to its normal return:
 
 Stack order
 -----------
-``@fact`` must be **above** ``@tool`` (see README §6.2). We detect the
-inverse and raise :class:`PinBoardConfigError` with a hint.
+``@pin`` must be **above** ``@tool`` (see README §6.2). We detect the
+inverse and raise :class:`AgentPinBoardConfigError` with a hint.
 
 Sync vs async
 -------------
@@ -39,19 +39,19 @@ from typing import Any
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ValidationError
 
-from pinboard import store as store_io
-from pinboard.config import get_config
-from pinboard.enums import OnDuplicate
-from pinboard.exceptions import (
-    PinBoardConfigError,
-    PinBoardValidationError,
+from agent_pinboard import store as store_io
+from agent_pinboard.config import get_config
+from agent_pinboard.enums import OnDuplicate
+from agent_pinboard.exceptions import (
+    AgentPinBoardConfigError,
+    AgentPinBoardValidationError,
 )
-from pinboard.extract import event_properties, extract
-from pinboard.graph import FactGraph
-from pinboard.hooks import PinBoardHooks, fire
-from pinboard.models import EventNode, FactEdge, FactNode, IngestResult, ToolCallRecord
-from pinboard.registry import register_model
-from pinboard.session import (
+from agent_pinboard.extract import event_properties, extract
+from agent_pinboard.graph import FactGraph
+from agent_pinboard.hooks import AgentPinBoardHooks, fire
+from agent_pinboard.models import EventNode, FactEdge, FactNode, IngestResult, ToolCallRecord
+from agent_pinboard.registry import register_model
+from agent_pinboard.session import (
     aget_or_load_session,
     get_or_load_session,
     lock_for,
@@ -65,26 +65,26 @@ logger = logging.getLogger(__name__)
 # Public decorator.                                                           #
 # --------------------------------------------------------------------------- #
 
-def fact(
+def pin(
     *,
     model: type[BaseModel],
     many: bool = False,
     on_duplicate: OnDuplicate = OnDuplicate.ALWAYS,
     mask_args: list[str] | None = None,
-    hooks: PinBoardHooks | None = None,
+    hooks: AgentPinBoardHooks | None = None,
     response_transform: Callable[[Any, IngestResult], Any] | None = None,
     store_raw: bool = False,
 ) -> Callable[[BaseTool], BaseTool]:
     """Decorate a LangChain tool so its results are extracted into the fact graph.
 
     ``store_raw=True`` additionally stashes the tool's raw return JSON
-    under ``("pinboard", thread_id, "raw_events", event_id)`` for each
+    under ``("agent_pinboard", thread_id, "raw_events", event_id)`` for each
     event the call produced, so the ``get_evidence`` tool can replay it.
     Default off to keep storage lean.
     """
     if not isinstance(model, type) or not issubclass(model, BaseModel):
-        raise PinBoardConfigError(
-            f"@fact(model=...) expects a Pydantic BaseModel subclass, got {model!r}"
+        raise AgentPinBoardConfigError(
+            f"@pin(model=...) expects a Pydantic BaseModel subclass, got {model!r}"
         )
     on_duplicate = OnDuplicate(on_duplicate)
     masked = list(mask_args or ())
@@ -95,15 +95,15 @@ def fact(
 
     def decorator(target: Any) -> BaseTool:
         if not isinstance(target, BaseTool):
-            raise PinBoardConfigError(
-                "@fact must be placed ABOVE @tool. "
-                "Correct order: `@fact(...) / @tool / def my_tool(...)`."
+            raise AgentPinBoardConfigError(
+                "@pin must be placed ABOVE @tool. "
+                "Correct order: `@pin(...) / @tool / def my_tool(...)`."
             )
 
         is_async = target.coroutine is not None
         original_func = target.coroutine if is_async else target.func
         if original_func is None:
-            raise PinBoardConfigError(
+            raise AgentPinBoardConfigError(
                 f"BaseTool {target.name!r} has neither func nor coroutine; cannot wrap"
             )
 
@@ -112,7 +112,7 @@ def fact(
             and not is_async
             and asyncio.iscoroutinefunction(response_transform)
         ):
-            raise PinBoardConfigError(
+            raise AgentPinBoardConfigError(
                 "sync tool cannot use an async response_transform — "
                 "the result is needed synchronously"
             )
@@ -166,7 +166,7 @@ class _Ctx:
         many: bool,
         on_duplicate: OnDuplicate,
         mask_args: list[str],
-        hooks: PinBoardHooks | None,
+        hooks: AgentPinBoardHooks | None,
         response_transform: Callable[[Any, IngestResult], Any] | None,
         tool_name: str,
         original_signature: inspect.Signature,
@@ -312,13 +312,13 @@ def _resolve_runtime(
                 runtime = v
                 break
     if runtime is None:
-        raise PinBoardConfigError(
+        raise AgentPinBoardConfigError(
             f"tool {ctx.tool_name!r} must declare a `runtime: ToolRuntime` parameter"
         )
     store = getattr(runtime, "store", None)
     if store is None:
-        raise PinBoardConfigError(
-            "graph must be compiled with .compile(store=...) to use @fact-decorated tools"
+        raise AgentPinBoardConfigError(
+            "graph must be compiled with .compile(store=...) to use @pin-decorated tools"
         )
     return store, thread_id_from(runtime)
 
@@ -353,8 +353,8 @@ def _validate(raw: Any, ctx: _Ctx) -> list[BaseModel]:
     """Coerce ``raw`` into a list of validated model instances. Fail-loud."""
     raw_items = raw if ctx.many else [raw]
     if ctx.many and not isinstance(raw_items, list):
-        raise PinBoardValidationError(
-            f"@fact(many=True): tool {ctx.tool_name!r} must return a list, "
+        raise AgentPinBoardValidationError(
+            f"@pin(many=True): tool {ctx.tool_name!r} must return a list, "
             f"got {type(raw_items).__name__}"
         )
     out: list[BaseModel] = []
@@ -365,7 +365,7 @@ def _validate(raw: Any, ctx: _Ctx) -> list[BaseModel]:
         try:
             out.append(ctx.model.model_validate(item))
         except ValidationError as exc:
-            raise PinBoardValidationError(
+            raise AgentPinBoardValidationError(
                 f"validation failed for tool {ctx.tool_name!r}"
                 f"{f' item #{i}' if ctx.many else ''}: {exc}"
             ) from exc
@@ -432,7 +432,7 @@ def _build_payload(
 def _fire_post_ingest_hooks(
     ctx: _Ctx, payload: _Payload, result: IngestResult, graph: FactGraph
 ) -> None:
-    """Fire hooks outside the lock — order: per-fact, per-edge, then summary."""
+    """Fire hooks outside the lock — order: per-pin, per-edge, then summary."""
     for _ev_id, ev_node in _iter_events(payload):
         fire(ctx.hooks, "on_node_added", ev_node)
     for f in payload.new_facts:
@@ -583,4 +583,4 @@ def _last_matching(
     return None
 
 
-__all__ = ["fact"]
+__all__ = ["pin"]

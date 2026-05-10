@@ -18,7 +18,7 @@ tools.
 ## `Entity` — node-type descriptor
 
 ```python
-from pinboard import Entity
+from agent_pinboard import Entity
 
 IP = Entity(
     name="IP",
@@ -40,7 +40,7 @@ construction. Define each one **once** (typically in a project
 ## `node()` — Pydantic field factory
 
 ```python
-from pinboard import node
+from agent_pinboard import node
 from pydantic import BaseModel
 
 class CloudTrailEvent(BaseModel):
@@ -51,7 +51,7 @@ class CloudTrailEvent(BaseModel):
     )
 ```
 
-`node(...)` returns a regular Pydantic `FieldInfo` with PinBoard
+`node(...)` returns a regular Pydantic `FieldInfo` with AgentPinBoard
 metadata attached. Pydantic still validates the field normally; the
 extractor reads the metadata to decide what to do with the value.
 
@@ -76,13 +76,13 @@ A heuristic that resolves 80% of cases:
 Plain-`Field` values land in `EventNode.properties` and are shown by
 `timeline`.
 
-## `@fact` — the decorator
+## `@pin` — the decorator
 
 ```python
-from pinboard import fact
+from agent_pinboard import pin
 from langchain_core.tools import tool
 
-@fact(model=CloudTrailEvent, many=True)
+@pin(model=CloudTrailEvent, many=True)
 @tool
 def fetch_cloudtrail(user: str, runtime: ToolRuntime) -> list[dict]:
     """Fetch CloudTrail logs for a user."""
@@ -99,8 +99,8 @@ The decorator is a side-effect. Every call:
 6. fires hooks;
 7. optionally rewrites the return via `response_transform`.
 
-`@fact` **must be above** `@tool`. Reverse order raises
-`PinBoardConfigError` at decoration time.
+`@pin` **must be above** `@tool`. Reverse order raises
+`AgentPinBoardConfigError` at decoration time.
 
 ## Star topology
 
@@ -125,15 +125,15 @@ A **session** is identified by `thread_id` (read from
 session lives in the LangGraph `Store` under a sharded namespace:
 
 ```
-("pinboard", thread_id, "nodes", node_id)        → FactNode | EventNode
-("pinboard", thread_id, "edges", edge_id)        → FactEdge
-("pinboard", thread_id, "entities")              → session entity registry
-("pinboard", thread_id, "tool_calls", record_id) → ToolCallRecord
+("agent_pinboard", thread_id, "nodes", node_id)        → FactNode | EventNode
+("agent_pinboard", thread_id, "edges", edge_id)        → FactEdge
+("agent_pinboard", thread_id, "entities")              → session entity registry
+("agent_pinboard", thread_id, "tool_calls", record_id) → ToolCallRecord
 ```
 
 In-memory caches accelerate the hot path; the store remains the source
 of truth. Sessions in the same process are isolated by `thread_id`. If
-no `thread_id` is supplied, PinBoard generates a UUID4 and warns —
+no `thread_id` is supplied, AgentPinBoard generates a UUID4 and warns —
 parallel "default" sessions never silently merge.
 
 ## Out of scope (deliberately)

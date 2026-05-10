@@ -2,7 +2,7 @@
 
 The graph is loaded from the Store once per session and kept in process
 memory thereafter. The lock protects the read-modify-write block of
-``@fact`` (step 4 in README §6.1) so parallel ingestion does not lose
+``@pin`` (step 4 in README §6.1) so parallel ingestion does not lose
 updates.
 
 Concurrency primitive
@@ -28,8 +28,8 @@ import threading
 import uuid
 from typing import TYPE_CHECKING
 
-from pinboard import store as store_io
-from pinboard.graph import FactGraph
+from agent_pinboard import store as store_io
+from agent_pinboard.graph import FactGraph
 
 if TYPE_CHECKING:
     from langgraph.prebuilt import ToolRuntime
@@ -48,7 +48,7 @@ _registry_lock = threading.Lock()
 def lock_for(thread_id: str) -> threading.RLock:
     """Return the per-session reentrant lock, creating it on first use.
 
-    Re-entrancy matters because ``@fact`` holds the lock for the
+    Re-entrancy matters because ``@pin`` holds the lock for the
     read-modify-write block and may call ``get_or_load_session`` from
     inside that block (the latter also acquires the lock for its own
     double-checked load).

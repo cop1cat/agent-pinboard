@@ -1,6 +1,6 @@
 """Process-global registry of declared :class:`Entity` instances.
 
-Populated eagerly when ``@fact(model=X)`` is applied — the model is scanned
+Populated eagerly when ``@pin(model=X)`` is applied — the model is scanned
 and every ``Entity`` referenced via ``node()`` is recorded. This lets
 ``graph_summary`` show the full known schema before any ingestion has
 happened.
@@ -17,9 +17,9 @@ from typing import get_args, get_origin
 
 from pydantic import BaseModel
 
-from pinboard.entity import Entity
-from pinboard.exceptions import PinBoardConfigError
-from pinboard.fields import field_entity
+from agent_pinboard.entity import Entity
+from agent_pinboard.exceptions import AgentPinBoardConfigError
+from agent_pinboard.fields import field_entity
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def _check_node_field_shape(model: type[BaseModel], name: str, annotation: objec
     *and* a structured object) and would silently fall through extractor rules.
     """
     if _is_basemodel_typed(annotation):
-        raise PinBoardConfigError(
+        raise AgentPinBoardConfigError(
             f"node() on field {model.__name__}.{name}: BaseModel-typed fields "
             "cannot be marked as nodes (they are containers, not values). "
             "Either mark a primitive field with node(), or remove node() and "

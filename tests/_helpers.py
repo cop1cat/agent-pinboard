@@ -1,8 +1,8 @@
-"""Test helpers: drive @fact-decorated tools via a tiny LangGraph."""
+"""Test helpers: drive @pin-decorated tools via a tiny LangGraph."""
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig

@@ -17,7 +17,7 @@
 ## `Entity` — описание типа ноды
 
 ```python
-from pinboard import Entity
+from agent_pinboard import Entity
 
 IP = Entity(
     name="IP",
@@ -39,7 +39,7 @@ IP = Entity(
 ## `node()` — фабрика Pydantic-поля
 
 ```python
-from pinboard import node
+from agent_pinboard import node
 from pydantic import BaseModel
 
 class CloudTrailEvent(BaseModel):
@@ -50,7 +50,7 @@ class CloudTrailEvent(BaseModel):
     )
 ```
 
-`node(...)` возвращает обычный Pydantic `FieldInfo` с PinBoard-метой.
+`node(...)` возвращает обычный Pydantic `FieldInfo` с AgentPinBoard-метой.
 Pydantic валидирует поле как обычно, экстрактор читает мету и решает,
 что делать со значением.
 
@@ -75,13 +75,13 @@ Pydantic валидирует поле как обычно, экстрактор
 Значения plain-`Field` попадают в `EventNode.properties` и видны
 агенту через `timeline`.
 
-## `@fact` — декоратор
+## `@pin` — декоратор
 
 ```python
-from pinboard import fact
+from agent_pinboard import pin
 from langchain_core.tools import tool
 
-@fact(model=CloudTrailEvent, many=True)
+@pin(model=CloudTrailEvent, many=True)
 @tool
 def fetch_cloudtrail(user: str, runtime: ToolRuntime) -> list[dict]:
     """Fetch CloudTrail logs for a user."""
@@ -98,8 +98,8 @@ def fetch_cloudtrail(user: str, runtime: ToolRuntime) -> list[dict]:
 6. дёргает хуки;
 7. опционально переписывает return через `response_transform`.
 
-`@fact` **всегда выше** `@tool`. Обратный порядок кидает
-`PinBoardConfigError` сразу при декорировании.
+`@pin` **всегда выше** `@tool`. Обратный порядок кидает
+`AgentPinBoardConfigError` сразу при декорировании.
 
 ## Star-топология
 
@@ -124,15 +124,15 @@ def fetch_cloudtrail(user: str, runtime: ToolRuntime) -> list[dict]:
 живёт в LangGraph `Store` под sharded-namespace:
 
 ```
-("pinboard", thread_id, "nodes", node_id)        → FactNode | EventNode
-("pinboard", thread_id, "edges", edge_id)        → FactEdge
-("pinboard", thread_id, "entities")              → session entity registry
-("pinboard", thread_id, "tool_calls", record_id) → ToolCallRecord
+("agent_pinboard", thread_id, "nodes", node_id)        → FactNode | EventNode
+("agent_pinboard", thread_id, "edges", edge_id)        → FactEdge
+("agent_pinboard", thread_id, "entities")              → session entity registry
+("agent_pinboard", thread_id, "tool_calls", record_id) → ToolCallRecord
 ```
 
 In-memory кеши ускоряют hot-path; store остаётся source of truth.
 Сессии в одном процессе изолированы по `thread_id`. Если `thread_id`
-не передан — PinBoard генерирует UUID4 и пишет warning, параллельные
+не передан — AgentPinBoard генерирует UUID4 и пишет warning, параллельные
 «анонимные» сессии не сольются молча.
 
 ## Вне scope (намеренно)

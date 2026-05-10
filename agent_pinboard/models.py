@@ -1,6 +1,6 @@
 """Graph data models — internal containers, NOT Pydantic.
 
-Pydantic is reserved for user-defined tool-response models. PinBoard's own
+Pydantic is reserved for user-defined tool-response models. AgentPinBoard's own
 graph state uses ``@dataclass(slots=True)`` for speed and clarity.
 
 ID strategy:
@@ -83,7 +83,7 @@ class FactEdge:
 
 @dataclass(slots=True)
 class IngestResult:
-    """Summary of one ``@fact`` invocation, passed to hooks and transforms."""
+    """Summary of one ``@pin`` invocation, passed to hooks and transforms."""
 
     event_ids: list[EventId]
     new_nodes: int

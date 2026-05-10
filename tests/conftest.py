@@ -1,6 +1,6 @@
 """Shared pytest fixtures.
 
-PinBoard relies on a small amount of process-global state (declared-entities
+AgentPinBoard relies on a small amount of process-global state (declared-entities
 registry, session graph cache, configure() settings). These fixtures reset
 that state between tests so the suite is order-independent.
 """
@@ -20,7 +20,7 @@ def store() -> InMemoryStore:
 
 
 @pytest.fixture(autouse=True)
-def reset_pinboard_state() -> Iterator[None]:
+def reset_agent_pinboard_state() -> Iterator[None]:
     """Wipe process-level state before and after each test.
 
     Modules are imported lazily — if a module isn't imported yet, its reset
@@ -34,9 +34,9 @@ def reset_pinboard_state() -> Iterator[None]:
 
 def _reset_all() -> None:
     for modname in (
-        "pinboard.registry",
-        "pinboard.session",
-        "pinboard.config",
+        "agent_pinboard.registry",
+        "agent_pinboard.session",
+        "agent_pinboard.config",
     ):
         try:
             mod = __import__(modname, fromlist=["_reset"])

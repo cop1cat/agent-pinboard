@@ -1,14 +1,14 @@
-"""End-to-end PinBoard agent demo with a deterministic mock LLM.
+"""End-to-end AgentPinBoard agent demo with a deterministic mock LLM.
 
 What this shows:
-* Defining `Entity`-s, Pydantic response models, and `@fact`-decorated tools.
+* Defining `Entity`-s, Pydantic response models, and `@pin`-decorated tools.
 * Wiring everything into a LangGraph agent via `create_agent`.
 * Driving the agent with a mock `BaseChatModel` so the demo runs without
   any LLM provider — handy for tests, CI, and offline development.
 
 Replace ``MockChatModel`` with any OpenAI-compatible client (Ollama,
 vLLM, OpenAI, Anthropic via langchain-anthropic, etc.) for a real agent.
-The PinBoard side is identical.
+The AgentPinBoard side is identical.
 
 Run:
     uv run python examples/agent_demo.py
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import ipaddress
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain.agents import create_agent
@@ -31,8 +31,7 @@ from langgraph.prebuilt import ToolRuntime
 from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel, Field
 
-from pinboard import Entity, fact, make_graph_tools, node
-
+from agent_pinboard import Entity, make_graph_tools, node, pin
 
 # --------------------------------------------------------------------------- #
 # 1. Domain model: entities + Pydantic schema                                  #
@@ -91,7 +90,7 @@ class VTReport(BaseModel):
 # 2. Tools                                                                     #
 # --------------------------------------------------------------------------- #
 
-@fact(model=CloudTrailEvent, many=True)
+@pin(model=CloudTrailEvent, many=True)
 @tool
 def fetch_cloudtrail(user_arn: str, runtime: ToolRuntime) -> list[dict]:
     """Fetch the user's recent CloudTrail events."""
@@ -100,18 +99,18 @@ def fetch_cloudtrail(user_arn: str, runtime: ToolRuntime) -> list[dict]:
             "src_ip": "185.220.101.42",
             "actor": {"user_arn": user_arn},
             "action_name": "AssumeRole",
-            "event_time": datetime.now(timezone.utc).isoformat(),
+            "event_time": datetime.now(UTC).isoformat(),
         },
         {
             "src_ip": "185.220.101.42",
             "actor": {"user_arn": user_arn},
             "action_name": "ListBuckets",
-            "event_time": datetime.now(timezone.utc).isoformat(),
+            "event_time": datetime.now(UTC).isoformat(),
         },
     ]
 
 
-@fact(model=VTReport)
+@pin(model=VTReport)
 @tool
 def vt_lookup(value: str, runtime: ToolRuntime) -> dict:
     """Check an IP, domain, or hash in VirusTotal."""
@@ -169,7 +168,7 @@ class MockChatModel(BaseChatModel):
             ai = AIMessage(content="Investigation complete.")
         return ChatResult(generations=[ChatGeneration(message=ai)])
 
-    def bind_tools(self, tools: list[Any], **_kwargs: Any) -> "MockChatModel":
+    def bind_tools(self, tools: list[Any], **_kwargs: Any) -> MockChatModel:
         # Real models need this to learn the tool schemas; the mock
         # already knows what to do, so it's a no-op.
         return self

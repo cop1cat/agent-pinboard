@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from pinboard import (
+from agent_pinboard import (
+    AgentPinBoardConfigError,
+    AgentPinBoardError,
+    AgentPinBoardExtractionError,
+    AgentPinBoardNormalizerError,
+    AgentPinBoardValidationError,
     Direction,
     OnDuplicate,
-    PinBoardConfigError,
-    PinBoardError,
-    PinBoardExtractionError,
-    PinBoardNormalizerError,
-    PinBoardValidationError,
 )
 
 
@@ -19,18 +19,18 @@ class TestExceptionHierarchy:
     @pytest.mark.parametrize(
         "exc_cls",
         [
-            PinBoardConfigError,
-            PinBoardValidationError,
-            PinBoardNormalizerError,
-            PinBoardExtractionError,
+            AgentPinBoardConfigError,
+            AgentPinBoardValidationError,
+            AgentPinBoardNormalizerError,
+            AgentPinBoardExtractionError,
         ],
     )
-    def test_subclass_of_pinboard_error(self, exc_cls: type[Exception]) -> None:
-        assert issubclass(exc_cls, PinBoardError)
+    def test_subclass_of_agent_pinboard_error(self, exc_cls: type[Exception]) -> None:
+        assert issubclass(exc_cls, AgentPinBoardError)
 
     def test_can_be_raised_and_caught_via_base(self) -> None:
-        with pytest.raises(PinBoardError):
-            raise PinBoardConfigError("boom")
+        with pytest.raises(AgentPinBoardError):
+            raise AgentPinBoardConfigError("boom")
 
 
 class TestEnums:

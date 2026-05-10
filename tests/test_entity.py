@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from pinboard import Entity
+from agent_pinboard import Entity
 
 
 class TestEntityValidation:
