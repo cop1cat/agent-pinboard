@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>AgentPinBoard live graph</title>
+<script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="https://unpkg.com/layout-base@2.0.1/layout-base.js"></script>
+<script src="https://unpkg.com/cose-base@2.2.0/cose-base.js"></script>
+<script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #1a1d22; color: #d8dee4; font-family: -apple-system, system-ui, sans-serif; }
+  #bar { padding: 8px 14px; border-bottom: 1px solid #2c3138; display: flex; gap: 14px; align-items: center; }
+  #bar h1 { font-size: 14px; margin: 0; font-weight: 500; }
+  #status { font-size: 12px; color: #7d8590; }
+  #status.ok { color: #56d364; }
+  #status.err { color: #ff6c6c; }
+  #counts { font-size: 12px; color: #7d8590; margin-left: auto; }
+  #cy { position: absolute; top: 41px; left: 0; right: 0; bottom: 0; }
+</style>
+</head>
+<body>
+  <div id="bar">
+    <h1>AgentPinBoard — live fact graph</h1>
+    <span id="status">connecting…</span>
+    <span id="counts"></span>
+  </div>
+  <div id="cy"></div>
+<script>
+// If the page is served by serve_websocket() itself (http://host:port/),
+// connect to ws://host:port/ on the same origin. When the file is opened
+// via file://, fall back to the canonical demo address. Override with
+// ?ws=ws://other-host:port/ if needed.
+const WS_URL = (() => {
+  const override = window.location.search.match(/[?&]ws=([^&]+)/)?.[1];
+  if (override) return decodeURIComponent(override);
+  if (window.location.protocol.startsWith("http")) {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${window.location.host}/`;
+  }
+  return "ws://localhost:8765/";
+})();
+
+// Distinct, calm colours per node_type. Hashing ensures stability across reloads.
+const PALETTE = ["#79c0ff", "#ffa657", "#d2a8ff", "#56d364", "#ff7b72", "#f0883e", "#a5d6ff", "#ffb6c1"];
+function colorForType(t) {
+  if (t === "Event") return "#5c6370";
+  let h = 0;
+  for (const c of t) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+
+const cy = cytoscape({
+  container: document.getElementById("cy"),
+  style: [
+    { selector: "node[kind='fact']", style: {
+      "background-color": (e) => colorForType(e.data("node_type")),
+      "label": "data(label)",
+      "color": "#e6edf3",
+      "font-size": 11,
+      "font-weight": 500,
+      "text-valign": "bottom",
+      "text-margin-y": 8,
+      "text-outline-color": "#1a1d22",
+      "text-outline-width": 3,
+      "text-outline-opacity": 1,
+      "text-max-width": 240,
+      "text-wrap": "ellipsis",
+      "border-width": 2,
+      "border-color": "rgba(0,0,0,0.5)",
+      "width": 30,
+      "height": 30,
+    }},
+    { selector: "node[kind='event']", style: {
+      "background-color": "#4d525a",
+      "shape": "diamond",
+      "label": "data(label)",
+      "color": "#8d96a0",
+      "font-size": 10,
+      "text-valign": "bottom",
+      "text-margin-y": 6,
+      "text-outline-color": "#1a1d22",
+      "text-outline-width": 3,
+      "text-outline-opacity": 1,
+      "width": 18,
+      "height": 18,
+    }},
+    { selector: "edge", style: {
+      "curve-style": "bezier",
+      "width": 1.5,
+      "line-color": "#454a52",
+      "target-arrow-color": "#454a52",
+      "target-arrow-shape": "triangle",
+      "arrow-scale": 0.9,
+      "label": "data(label)",
+      "color": "#6d737c",
+      "font-size": 9,
+      "text-rotation": "autorotate",
+      "text-outline-color": "#1a1d22",
+      "text-outline-width": 3,
+      "text-outline-opacity": 1,
+    }},
+    { selector: "node:selected", style: {
+      "border-width": 3, "border-color": "#79c0ff",
+    }},
+  ],
+  layout: { name: "grid" },     // placeholder; re-laid out as soon as we have data
+  wheelSensitivity: 0.2,
+  minZoom: 0.2,
+  maxZoom: 2.5,
+});
+
+// fcose is loaded from CDN; register it with cytoscape.
+if (typeof cytoscapeFcose !== "undefined") cytoscape.use(cytoscapeFcose);
+
+const LAYOUT_OPTS = {
+  name: typeof cytoscapeFcose !== "undefined" ? "fcose" : "cose",
+  animate: false,
+  quality: "proof",
+  nodeDimensionsIncludeLabels: true,    // labels count as part of the node's bounding box
+  randomize: true,                      // start from random positions (prevents straight-line minima)
+  idealEdgeLength: 180,
+  nodeSeparation: 160,
+  nodeRepulsion: 15000,
+  edgeElasticity: 0.4,
+  gravity: 0.25,
+  gravityRange: 3.8,
+  gravityRangeCompound: 1.5,
+  gravityCompound: 1.0,
+  numIter: 2500,
+  packComponents: false,                // for small star graphs this tends to cluster things
+  padding: 60,
+};
+
+function runLayout() {
+  cy.layout(LAYOUT_OPTS).run();
+  // Generous padding on fit — graph fills ~60% of viewport, not 95%,
+  // so neighbouring labels don't visually crowd. Cap zoom at 1.0 so
+  // small graphs don't balloon into view.
+  cy.fit(undefined, 120);
+  if (cy.zoom() > 1.0) cy.zoom(1.0);
+  cy.center();
+}
+
+// Fact edges whose type ends with one of these are treated as "what did this
+// event do" markers; the target's value is promoted into the event's label.
+const ACTION_EDGE_SUFFIXES = ["action_name", "action", "operation", "event_name", "status", "kind"];
+
+function refreshEventLabels() {
+  cy.nodes("[kind='event']").forEach((ev) => {
+    const base = `${ev.data("source_tool")}@${ev.data("timestamp").slice(11, 19)}`;
+    let hint = null;
+    ev.outgoers("edge").forEach((edge) => {
+      if (hint) return;
+      const t = edge.data("edge_type") || "";
+      if (ACTION_EDGE_SUFFIXES.some((s) => t.endsWith(s))) {
+        const target = edge.target();
+        const value = target.data("value");
+        if (typeof value === "string" && value.length > 0) {
+          hint = value.length > 24 ? value.slice(0, 24) + "…" : value;
+        }
+      }
+    });
+    ev.data("label", hint ? `${base} · ${hint}` : base);
+  });
+}
+
+const statusEl = document.getElementById("status");
+const countsEl = document.getElementById("counts");
+
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = cls || "";
+}
+
+function refreshCounts() {
+  const facts = cy.nodes("[kind='fact']");
+  const types = {};
+  facts.forEach((n) => {
+    const t = n.data("node_type");
+    types[t] = (types[t] || 0) + 1;
+  });
+  const events = cy.nodes("[kind='event']").length;
+  const parts = Object.entries(types).map(([k, v]) => `${k}: ${v}`).sort();
+  parts.push(`events: ${events}`);
+  countsEl.textContent = parts.join("  ·  ");
+}
+
+function applySnapshot(msg) {
+  cy.elements().remove();
+  for (const n of msg.nodes) {
+    cy.add({ group: "nodes", data: n });
+  }
+  for (const e of msg.edges) {
+    cy.add({ group: "edges", data: e });
+  }
+  refreshEventLabels();
+  runLayout();
+  refreshCounts();
+}
+
+function applyDelta(msg) {
+  if (msg.type === "node_added") {
+    if (cy.getElementById(msg.node.id).length === 0) {
+      const ele = cy.add({ group: "nodes", data: msg.node });
+      ele.flashClass("just-added", 600);
+    }
+  } else if (msg.type === "edge_added") {
+    if (cy.getElementById(msg.edge.id).length === 0) {
+      cy.add({ group: "edges", data: msg.edge });
+    }
+  } else if (msg.type === "link_found") {
+    const n = cy.getElementById(msg.node_id);
+    if (n.length) n.flashClass("just-relinked", 800);
+  } else if (msg.type === "ingest_complete") {
+    setStatus(`ingest: +${msg.result.new_nodes} nodes / +${msg.result.linked_nodes} linked / +${msg.result.new_edges} edges`, "ok");
+    // One ingest is the natural "transaction boundary" — relayout and
+    // fit the viewport here so each agent step produces a single,
+    // settled frame instead of a strobing one.
+    refreshEventLabels();
+    refreshCounts();
+    runLayout();
+    return;
+  }
+  refreshEventLabels();
+  refreshCounts();
+}
+
+function connect() {
+  setStatus(`connecting to ${WS_URL}…`);
+  const ws = new WebSocket(WS_URL);
+  ws.onopen = () => setStatus("connected", "ok");
+  ws.onclose = () => {
+    setStatus("disconnected — retry in 2s", "err");
+    setTimeout(connect, 2000);
+  };
+  ws.onerror = () => setStatus("error", "err");
+  ws.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === "snapshot") applySnapshot(msg);
+      else applyDelta(msg);
+    } catch (e) {
+      console.error("bad message", e, ev.data);
+    }
+  };
+}
+
+connect();
+</script>
+</body>
+</html>
