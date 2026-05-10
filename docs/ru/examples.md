@@ -140,16 +140,15 @@ from langgraph.prebuilt import ToolNode
 from langgraph.store.memory import InMemoryStore
 from typing_extensions import TypedDict
 
-from agent_pinboard import LoggingHook, make_graph_tools
+from agent_pinboard import make_graph_tools
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
-hooks = LoggingHook()
 agent_tools = [
     fetch_cloudtrail,
     vt_lookup,
-    *make_graph_tools(hooks=hooks),
+    *make_graph_tools(),
 ]
 
 g = StateGraph(State)
@@ -279,29 +278,31 @@ def director_other_companies(name: str, runtime: ToolRuntime) -> dict:
 
 ## Пример 3 — Кастомный хук (alerting на подозрительные линки)
 
-Хук, который срабатывает, когда уже известный «плохой» IP
-залинковывается, независимо от того, какой тул его поднял.
+LangChain callback handler, который срабатывает, когда уже известный
+«плохой» IP залинковывается, независимо от того, какой тул его поднял.
 
 ```python
-from typing import override
-from agent_pinboard import AgentPinBoardHooks
-from agent_pinboard.models import EventId, FactNode
+from langchain_core.callbacks import BaseCallbackHandler
+from agent_pinboard.decorator import INGEST_EVENT
 
 KNOWN_BAD = {"185.220.101.42", "45.77.0.1"}
 
-class BadIPAlerter(AgentPinBoardHooks):
-    @override
-    def on_link_found(self, existing: FactNode, event_id: EventId) -> None:
-        if existing.node_type == "IP" and existing.value in KNOWN_BAD:
-            print(f"!!! KNOWN BAD IP RE-OBSERVED: {existing.value} (event {event_id})")
+class BadIPAlerter(BaseCallbackHandler):
+    def on_custom_event(self, name, data, *, run_id, tags=None, metadata=None, **kw):
+        if name != INGEST_EVENT:
+            return
+        first_event = data["result"].event_ids[0] if data["result"].event_ids else ""
+        for fact in data["linked_facts"]:
+            if fact.node_type == "IP" and fact.value in KNOWN_BAD:
+                print(f"!!! KNOWN BAD IP RE-OBSERVED: {fact.value} (event {first_event})")
 
-hooks = BadIPAlerter()
+agent.invoke(..., config={"callbacks": [BadIPAlerter()], "configurable": {...}})
 ```
 
-`on_link_found` срабатывает, когда существующий факт получает новое
-ребро от нового события — то есть ровно когда «мы снова видим этот
-IP в новом контексте». Хорошо подходит для live-алертов без траты
-токенов на LLM.
+`linked_facts` в payload-е custom-event'а перечисляет ровно те факты,
+которые этот ингест перепривязал — то есть «мы снова видим этот IP в
+новом контексте». Хорошо подходит для live-алертов без траты токенов
+на LLM.
 
 ## Пример 4 — Async-тулы
 
@@ -328,16 +329,16 @@ async def vt_lookup(value: str, runtime: ToolRuntime) -> dict:
 
 ## Пример 5 — Полный LangGraph-агент с mock LLM
 
-`examples/agent_demo.py` — runnable end-to-end агент, использующий
+`examples/agent_demo.ipynb` — runnable end-to-end агент, использующий
 `langchain.agents.create_agent` с детерминированной mock chat model.
 Mock проходит фиксированный план (graph_summary → fetch_cloudtrail →
 vt_lookup → explore → find_path → timeline) — демо работает без
 API-ключей.
 
-Запуск:
+Открыть в Jupyter (или прочесть прямо на GitHub — он рендерит inline):
 
 ```bash
-uv run python examples/agent_demo.py
+jupyter notebook examples/agent_demo.ipynb
 ```
 
 Чтобы подключить реальную LLM — замените `MockChatModel` на любую
@@ -353,11 +354,15 @@ from agent_pinboard.integrations.langfuse_hook import LangfuseHook
 
 client = Langfuse(public_key="pk-…", secret_key="sk-…", host="https://cloud.langfuse.com")
 
-hooks = LangfuseHook(client, max_facts_in_snapshot=20)
+handler = LangfuseHook(client, max_facts_in_snapshot=20)
 
-@pin(model=CloudTrailEvent, many=True, hooks=hooks)
-@tool
-def fetch_cloudtrail(...): ...
+result = await agent.ainvoke(
+    {"messages": [...]},
+    config={
+        "callbacks": [handler],
+        "configurable": {"thread_id": "session-42"},
+    },
+)
 ```
 
 Каждый вызов `fetch_cloudtrail` шлёт:

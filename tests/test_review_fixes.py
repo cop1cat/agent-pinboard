@@ -19,16 +19,18 @@ from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
+from langchain_core.callbacks import BaseCallbackHandler
+
 import agent_pinboard
 from agent_pinboard import (
     AgentPinBoardConfigError,
-    AgentPinBoardHooks,
     Direction,
     Entity,
     make_graph_tools,
     node,
     pin,
 )
+from agent_pinboard.decorator import INGEST_EVENT
 
 IP = Entity(name="IP", description="ipv4/ipv6", normalizer=lambda v: str(v).lower())
 User = Entity(name="User", description="acting principal")
@@ -59,7 +61,17 @@ def _build(tools, store):
     return g.compile(store=store)
 
 
-def _call(graph, name: str, args: dict, thread_id: str = "tid", call_id: str = "c-1") -> str:
+def _call(
+    graph,
+    name: str,
+    args: dict,
+    thread_id: str = "tid",
+    call_id: str = "c-1",
+    callbacks: list | None = None,
+) -> str:
+    config: dict = {"configurable": {"thread_id": thread_id}}
+    if callbacks:
+        config["callbacks"] = callbacks
     out = graph.invoke(
         {
             "messages": [
@@ -69,9 +81,20 @@ def _call(graph, name: str, args: dict, thread_id: str = "tid", call_id: str = "
                 )
             ]
         },
-        config={"configurable": {"thread_id": thread_id}},
+        config=config,
     )
     return out["messages"][-1].content
+
+
+class _IngestRecorder(BaseCallbackHandler):
+    """Test callback that records every agent_pinboard:ingest event payload."""
+
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    def on_custom_event(self, name, data, *, run_id, tags=None, metadata=None, **kwargs):
+        if name == INGEST_EVENT:
+            self.events.append(data)
 
 
 # --------------------------------------------------------------------------- #
@@ -154,23 +177,25 @@ def test_b1_explore_direction_with_events_visible(store: InMemoryStore) -> None:
 # B2 — on_link_found fires when an existing fact is re-linked.                #
 # --------------------------------------------------------------------------- #
 
-def test_b2_on_link_found_fires(store: InMemoryStore) -> None:
-    seen_links: list[str] = []
+def test_b2_linked_facts_surface_in_dispatched_event(store: InMemoryStore) -> None:
+    """The second ingest of the same canonical fact reports it as linked
+    in the dispatched ``agent_pinboard:ingest`` payload."""
+    rec = _IngestRecorder()
 
-    class H(AgentPinBoardHooks):
-        def on_link_found(self, existing, event_id):
-            seen_links.append(existing.value)
-
-    @pin(model=CTEvent, hooks=H())
+    @pin(model=CTEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
         return {"src_ip": value}
 
     graph = _build([fetch], store)
-    _call(graph, "fetch", {"value": "1.1.1.1"}, call_id="a")
-    _call(graph, "fetch", {"value": "1.1.1.1"}, call_id="b")
-    assert seen_links == ["1.1.1.1"]  # second call links the existing node
+    _call(graph, "fetch", {"value": "1.1.1.1"}, call_id="a", callbacks=[rec])
+    _call(graph, "fetch", {"value": "1.1.1.1"}, call_id="b", callbacks=[rec])
+    # First ingest: src_ip is brand new, no linked facts.
+    assert rec.events[0]["linked_facts"] == []
+    # Second ingest: same canonical → reported as linked.
+    linked_values = [f.value for f in rec.events[1]["linked_facts"]]
+    assert linked_values == ["1.1.1.1"]
 
 
 # --------------------------------------------------------------------------- #
@@ -224,19 +249,15 @@ def test_b4_node_on_basemodel_field_raises_at_registration() -> None:
 def test_b6_linked_nodes_dedup(store: InMemoryStore) -> None:
     """Two fields pointing to the same canonical → linked_nodes increments by 1."""
 
-    captured: list[int] = []
+    rec = _IngestRecorder()
 
-    class H(AgentPinBoardHooks):
-        def on_ingest_complete(self, result):
-            captured.append(result.linked_nodes)
-
-    @pin(model=CTEvent, hooks=H())
+    @pin(model=CTEvent)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
         return {"src_ip": "1.1.1.1"}
 
-    @pin(model=CTEvent, hooks=H())
+    @pin(model=CTEvent)
     @tool
     def repeat(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -244,10 +265,10 @@ def test_b6_linked_nodes_dedup(store: InMemoryStore) -> None:
         return {"src_ip": "1.1.1.1", "dst_ip": "1.1.1.1"}
 
     graph = _build([fetch, repeat], store)
-    _call(graph, "fetch", {"value": "x"}, call_id="a")
-    _call(graph, "repeat", {"value": "y"}, call_id="b")
+    _call(graph, "fetch", {"value": "x"}, call_id="a", callbacks=[rec])
+    _call(graph, "repeat", {"value": "y"}, call_id="b", callbacks=[rec])
     # First call: new node, linked=0. Second call: 0 new, 1 linked (deduped).
-    assert captured == [0, 1]
+    assert [e["result"].linked_nodes for e in rec.events] == [0, 1]
 
 
 # --------------------------------------------------------------------------- #
@@ -263,10 +284,11 @@ def test_b9_no_dead_helper() -> None:
 # S1 — public API does not advertise unimplemented hooks.                     #
 # --------------------------------------------------------------------------- #
 
-def test_s1_no_phantom_hook_exports() -> None:
-    from agent_pinboard import hooks as hmod
-    assert not hasattr(hmod, "LangfuseHook")
-    assert not hasattr(hmod, "WebSocketHook")
+def test_s1_hooks_module_no_longer_exists() -> None:
+    """Observability is wired through LangChain callbacks now —
+    agent_pinboard.hooks was removed in PR #3."""
+    with pytest.raises(ImportError):
+        from agent_pinboard import hooks  # noqa: F401
 
 
 # --------------------------------------------------------------------------- #

@@ -1,6 +1,6 @@
 """Read-side graph tools exposed to the LLM agent.
 
-``make_graph_tools(hooks=...)`` returns a list of LangChain ``BaseTool``
+``make_graph_tools()`` returns a list of LangChain ``BaseTool``
 instances for the agent to call. They are the *only* read API for the
 graph from inside an agent — the LLM uses them to navigate facts,
 events, and the tool-call log.
@@ -31,7 +31,6 @@ from agent_pinboard import store as store_io
 from agent_pinboard.enums import Direction
 from agent_pinboard.exceptions import AgentPinBoardConfigError
 from agent_pinboard.graph import FactGraph
-from agent_pinboard.hooks import AgentPinBoardHooks
 from agent_pinboard.models import EVENT_NODE_TYPE, EventNode, FactEdge, FactNode
 from agent_pinboard.registry import known_entities
 from agent_pinboard.session import get_or_load_session, lock_for, thread_id_from
@@ -40,12 +39,8 @@ from agent_pinboard.session import get_or_load_session, lock_for, thread_id_from
 # Public factory.                                                             #
 # --------------------------------------------------------------------------- #
 
-def make_graph_tools(hooks: AgentPinBoardHooks | None = None) -> list[BaseTool]:
-    """Build the per-session set of graph-read tools.
-
-    ``hooks`` is accepted for symmetry with ``@pin``, but the read tools
-    do not currently mutate the graph and so do not invoke them.
-    """
+def make_graph_tools() -> list[BaseTool]:
+    """Build the per-session set of graph-read tools."""
 
     @tool
     def explore(

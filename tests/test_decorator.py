@@ -190,24 +190,27 @@ class TestStoreMissing:
             )
 
 
-class TestHooksFire:
-    def test_on_ingest_complete_called(self, store: InMemoryStore) -> None:
-        from agent_pinboard.hooks import AgentPinBoardHooks
+class TestIngestEventDispatch:
+    def test_dispatched_event_carries_result(self, store: InMemoryStore) -> None:
+        from langchain_core.callbacks import BaseCallbackHandler
+
+        from agent_pinboard.decorator import INGEST_EVENT
 
         seen: list[int] = []
 
-        class H(AgentPinBoardHooks):
-            def on_ingest_complete(self, result):
-                seen.append(result.new_nodes)
+        class Recorder(BaseCallbackHandler):
+            def on_custom_event(self, name, data, *, run_id, tags=None, metadata=None, **kw):
+                if name == INGEST_EVENT:
+                    seen.append(data["result"].new_nodes)
 
-        @pin(model=CloudTrailEvent, hooks=H())
+        @pin(model=CloudTrailEvent)
         @tool
         def fetch(value: str, runtime: ToolRuntime) -> dict:
             """."""
             return {"src_ip": "1.1.1.1", "actor": "a", "action": "X"}
 
         graph = make_runner([fetch], store)
-        call(graph, "fetch", {"value": "v"}, "tid")
+        call(graph, "fetch", {"value": "v"}, "tid", callbacks=[Recorder()])
         assert seen == [2]
 
 

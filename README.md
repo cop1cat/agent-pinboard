@@ -6,7 +6,7 @@
 
 AgentPinBoard — Python-библиотека, реализующая рабочую память LLM-агента в виде графа фактов на время одной сессии. Метафора — детективная доска: агент вызывает тулы, полученные данные автоматически превращаются в ноды и рёбра графа, агент читает граф и принимает решения на его основе.
 
-AgentPinBoard — это примитивы: модель графа, декоратор для извлечения фактов из результатов тулов, готовые тулы чтения графа, система хуков. Сам агент (LangGraph StateGraph, промпты, выбор модели) — пользовательский код поверх этих примитивов.
+AgentPinBoard — это примитивы: модель графа, декоратор для извлечения фактов из результатов тулов, готовые тулы чтения графа, observability через стандартные LangChain-callbacks. Сам агент (LangGraph StateGraph, промпты, выбор модели) — пользовательский код поверх этих примитивов.
 
 Типичные сценарии: расследование security-инцидента, due diligence по компании, разбор биографии/кейса, threat intelligence, связывание сущностей между разными API. Везде, где агент многоразово дёргает тулы, накапливает сущности и должен удерживать связи между ними — лучше чем в линейной истории сообщений.
 
@@ -46,8 +46,8 @@ AgentPinBoard — это примитивы: модель графа, декор
 │   graph_summary, search_nodes, what_have_i_done.            │
 │   find_path (Фаза 2), get_evidence (Фаза 3).                │
 │                                                             │
-│   Хуки: on_node_added, on_edge_added, on_ingest_complete,   │
-│   on_graph_changed, ...                                     │
+│   Observability: dispatch_custom_event(                     │
+│   "agent_pinboard:ingest", ...) → LangChain callbacks       │
 └──────────────────────┬──────────────────────────────────────┘
                        │ хранится в
 ┌──────────────────────▼──────────────────────────────────────┐
@@ -379,15 +379,14 @@ def vt_lookup(value: str, api_key: str, runtime: ToolRuntime) -> dict: ...
 @pin(
     model=CloudTrailEvent,
     many=True,
-    hooks=hooks,
     response_transform=lambda raw, result: f"Loaded {len(raw)} events, {result.new_nodes} new entities",
 )
 @tool
 def fetch_cloudtrail(...): ...
 ```
 
-- `hooks` — `AgentPinBoardHooks`-совместимый объект, слушает изменения графа. Сюда же пишется любая пользовательская логика-наблюдатель (см. `on_ingest_complete` в 11.1).
 - `response_transform` — меняет то, что увидит LLM (по умолчанию — оригинальный return).
+- Observability подключается через **LangChain callbacks** — handlers передаются в `config={"callbacks": [...]}` на `agent.invoke` / `ainvoke`, см. §11.
 
 **Сигнатура `response_transform`:** `(raw: Any, result: IngestResult) -> Any`.
 
@@ -554,7 +553,7 @@ configure(tool_log_soft_limit=500)   # default
 ```python
 from agent_pinboard.tools import make_graph_tools
 
-graph_tools = make_graph_tools(hooks=hooks)
+graph_tools = make_graph_tools()
 ```
 
 | Тул | Фаза | Сигнатура | Возврат |
@@ -657,60 +656,54 @@ Related facts (via 3 events):
 
 ---
 
-## 11. Система хуков
+## 11. Observability через LangChain callbacks
 
-### 11.1 Базовый класс
+### 11.1 Принцип
 
-```python
-class AgentPinBoardHooks:
-    def on_node_added(self, node: FactNode | EventNode) -> None: ...
-    def on_edge_added(self, edge: FactEdge) -> None: ...
-    def on_link_found(self, existing: FactNode, event_id: EventId) -> None: ...
-    def on_ingest_complete(self, result: IngestResult) -> None: ...
-    def on_graph_changed(self, graph: FactGraph) -> None: ...
-```
+Своей системы хуков у AgentPinBoard нет. Observability подключается через **стандартный LangChain callback-канал**: после каждого успешного `@pin`-ингеста декоратор диспатчит custom-event `agent_pinboard:ingest` через `langchain_core.callbacks.dispatch_custom_event` (sync) / `adispatch_custom_event` (async). Любой `BaseCallbackHandler`-подкласс, переданный через `config={"callbacks": [...]}` на `agent.invoke` / `ainvoke`, получает event в `on_custom_event`.
 
-Все методы — no-op по умолчанию. Каждый вызов обёрнут `try/except`, ошибка логируется, ingestion продолжается.
-
-Пользовательский подкласс — с декоратором `@override` (Python 3.12+) для защиты от опечаток:
+Это значит: тот же канал, через который LangChain отдаёт `on_tool_start` / `on_tool_end` / `on_llm_start`, отдаёт и события AgentPinBoard. Spans Langfuse наследуют parent от текущего LangChain run — трейс остаётся связным.
 
 ```python
-from typing import override
+from langchain_core.callbacks import BaseCallbackHandler
+from agent_pinboard.decorator import INGEST_EVENT  # "agent_pinboard:ingest"
 
-class MyHook(AgentPinBoardHooks):
-    @override
-    def on_ingest_complete(self, result: IngestResult) -> None:
-        logger.info("+%d nodes", result.new_nodes)
+class PrintIngest(BaseCallbackHandler):
+    def on_custom_event(self, name, data, *, run_id, tags=None, metadata=None, **kw):
+        if name != INGEST_EVENT:
+            return
+        r = data["result"]
+        print(f"{data['tool_name']}: +{r.new_nodes} new, +{r.linked_nodes} linked")
+
+agent.invoke(
+    {"messages": [...]},
+    config={"configurable": {"thread_id": "..."}, "callbacks": [PrintIngest()]},
+)
 ```
 
-### 11.2 Готовые реализации
+### 11.2 Payload `agent_pinboard:ingest`
 
-```python
-from agent_pinboard.hooks import LoggingHook, LangfuseHook, WebSocketHook, CompositeHook
-```
+`data` — dict со следующими ключами:
 
-- `LoggingHook` — пишет в `logging`.
-- `LangfuseHook` — отправляет span-ы в Langfuse.
-- `WebSocketHook` — стримит дельты графа (для UI-визуализации).
-- `CompositeHook` — объединяет несколько хуков.
+- `thread_id: str`
+- `tool_name: str`
+- `result: IngestResult` (`event_ids`, `new_nodes`, `linked_nodes`, `new_edges`, `warnings`)
+- `events: list[EventNode]` — один на вызов (или один на элемент при `many=True`)
+- `new_facts: list[FactNode]` — свежесозданные факты
+- `linked_facts: list[FactNode]` — существующие факты, на которые этот ингест навесил линк
+- `new_edges: list[FactEdge]` — по одному на occurrence факта в модели
+- `graph: FactGraph` — граф после ингеста (in-memory, view этого вызова)
 
-### 11.3 Подключение
+### 11.3 Изоляция ошибок
 
-Хуки передаются в декоратор тула и в фабрику graph-тулов. Как правило — один и тот же объект:
+Декоратор оборачивает `dispatch_custom_event` в `try/except`: handler, который кинул исключение, **не ломает ingestion** — exception логируется на ERROR. Для контекстов без runnable-цепочки (юнит-тесты, прямой вызов wrapped-тула) ловится отдельный `RuntimeError` от `dispatch_custom_event` — диспатч просто no-op-ится.
 
-```python
-hooks = CompositeHook([LoggingHook(), LangfuseHook(client=langfuse)])
+### 11.4 Готовые интеграции
 
-@pin(model=CloudTrailEvent, many=True, hooks=hooks)
-@tool
-def fetch_cloudtrail(...): ...
+- `agent_pinboard.integrations.langfuse_hook.LangfuseHook` — `BaseCallbackHandler`, эмитит `agent_pinboard.ingest` + `agent_pinboard.graph_snapshot` (с Mermaid-схемой) span-ы в Langfuse. Опциональная зависимость `agent_pinboard[langfuse]`.
+- `agent_pinboard.integrations.websocket_hook.WebSocketHook` — `BaseCallbackHandler`, складывает дельты (`node_added` / `edge_added` / `link_found` / `ingest_complete`) в очередь, которую раздаёт `serve_websocket(handler, ...)` подключённым клиентам. Опциональная зависимость `agent_pinboard[ws]`. Готовый Cytoscape.js-фронтенд лежит в `examples/web/index.html`.
 
-graph_tools = make_graph_tools(hooks=hooks)
-```
-
-### 11.4 WebSocket-визуализация
-
-`WebSocketHook` шлёт дельты (не полный граф) на каждое изменение — фронт на Cytoscape.js анимирует граф в реалтайме, детективная доска «оживает».
+Подробности — `docs/{en,ru}/hooks-and-config.md`.
 
 ---
 
@@ -725,28 +718,26 @@ from langgraph.store.memory import InMemoryStore
 
 from agent_pinboard import pin
 from agent_pinboard.tools import make_graph_tools
-from agent_pinboard.hooks import LangfuseHook
+from agent_pinboard.integrations.langfuse_hook import LangfuseHook
 
 # my_project — гипотетический модуль пользователя:
 #   entities.py — Entity-инстансы (IP, User, Domain, ...)
 #   models.py — Pydantic-модели ответов тулов, размеченные node(...)
 from my_project.models import CloudTrailEvent, OktaEvent, VTReport
 
-hooks = LangfuseHook(client=langfuse)
-
-@pin(model=CloudTrailEvent, many=True, hooks=hooks)
+@pin(model=CloudTrailEvent, many=True)
 @tool
 def fetch_cloudtrail(user_arn: str, hours: int, runtime: ToolRuntime) -> list[dict]:
     """Fetch CloudTrail logs for a user"""
     return boto3_client.lookup_events(UserArn=user_arn, Hours=hours)
 
-@pin(model=OktaEvent, many=True, hooks=hooks)
+@pin(model=OktaEvent, many=True)
 @tool
 def fetch_okta(user_email: str, runtime: ToolRuntime) -> list[dict]:
     """Fetch Okta logs for a user"""
     return okta_client.get_logs(filter=f'actor.alternateId eq "{user_email}"')
 
-@pin(model=VTReport, hooks=hooks)
+@pin(model=VTReport)
 @tool
 async def vt_lookup(value: str, runtime: ToolRuntime) -> dict:
     """Check IP/domain/hash in VirusTotal"""
@@ -760,14 +751,19 @@ agent = create_agent(
         fetch_cloudtrail,
         fetch_okta,
         vt_lookup,
-        *make_graph_tools(hooks=hooks),
+        *make_graph_tools(),
     ],
     store=store,
 )
 
+# Observability — стандартные LangChain callbacks. LangfuseHook —
+# BaseCallbackHandler, диспатчится через config["callbacks"].
 result = agent.invoke(
     {"messages": [{"role": "user", "content": "Investigate AssumeRole from 185.220.101.42"}]},
-    config={"configurable": {"thread_id": "investigation-001"}},
+    config={
+        "configurable": {"thread_id": "investigation-001"},
+        "callbacks": [LangfuseHook(client=langfuse)],
+    },
 )
 ```
 
@@ -813,7 +809,6 @@ from agent_pinboard import (
     FactGraph,
     FactNode, FactEdge, EventNode,
     IngestResult,
-    AgentPinBoardHooks,
     # Exceptions
     AgentPinBoardError,
     AgentPinBoardConfigError,
@@ -824,11 +819,10 @@ from agent_pinboard import (
 
 from agent_pinboard.tools import make_graph_tools
 
-from agent_pinboard.hooks import (
-    LoggingHook,
-    CompositeHook,
-)
-# LangfuseHook (Фаза 2) и WebSocketHook (Фаза 3) добавятся позже.
+# Optional integrations — оба handler-а наследуются от LangChain
+# BaseCallbackHandler и подключаются через config["callbacks"].
+from agent_pinboard.integrations.langfuse_hook import LangfuseHook
+from agent_pinboard.integrations.websocket_hook import WebSocketHook
 ```
 
 ### 15.1 Что НЕ входит в ядро
@@ -856,7 +850,7 @@ from agent_pinboard.hooks import (
 - Graph-тулы: `explore` (с `Direction`), `timeline`, `graph_summary`, `search_nodes`, `what_have_i_done`.
 - EventNode скрыты по умолчанию в `search_nodes` / `graph_summary`.
 - Exception hierarchy (`AgentPinBoardError` и подклассы).
-- `AgentPinBoardHooks` + `LoggingHook` с log-and-continue поведением.
+- Observability через стандартный LangChain callback-канал (`dispatch_custom_event("agent_pinboard:ingest", ...)`); готовые `LangfuseHook` / `WebSocketHook` поставляются как опциональные `BaseCallbackHandler`-ы.
 - `configure(tool_log_soft_limit=500)` глобальный конфиг.
 
 **Acceptance criteria (что считается готовым):**
@@ -865,7 +859,7 @@ from agent_pinboard.hooks import (
 2. **Автолинковка и дедупликация.** Тест: два вызова с одинаковым IP в разных тулах. В графе — одна FactNode типа IP, две EventNode, `FactNode.source_tools` содержит оба имени, `source_events` содержит оба event_id.
 3. **Recursion guard.** Тест: модель `Process(parent: Process | None)`, eager-scan не зависает.
 4. **Concurrency.** Тест: 10 параллельных `@pin`-тулов в одном LangGraph-шаге, каждый добавляет ноду. После всех — в графе 10 нод, ни одного lost-update.
-5. **Duplicate detection.** Тест: два вызова с одинаковыми args + `on_duplicate="skip"`. Второй вызов не исполняет тул-функцию (проверяется по счётчику вызовов mock), возвращает маркер-строку, хуки не зовутся.
+5. **Duplicate detection.** Тест: два вызова с одинаковыми args + `on_duplicate="skip"`. Второй вызов не исполняет тул-функцию (проверяется по счётчику вызовов mock), возвращает маркер-строку, `agent_pinboard:ingest` event не диспатчится.
 6. **Fail-loud на валидации.** Тест: тул возвращает битый dict. `@pin` кидает `AgentPinBoardValidationError`, граф не меняется.
 7. **Session isolation.** Тест: два `thread_id` в одном процессе, события одной сессии не видны во второй.
 8. **Discovery без ingestion.** Тест: агент с `@pin`-тулами, но без вызовов. `graph_summary()` возвращает list known types из eager-registry (counts = 0).

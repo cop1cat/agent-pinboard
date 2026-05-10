@@ -36,6 +36,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from langchain_core.callbacks import adispatch_custom_event, dispatch_custom_event
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ValidationError
 
@@ -48,7 +49,6 @@ from agent_pinboard.exceptions import (
 )
 from agent_pinboard.extract import event_properties, extract
 from agent_pinboard.graph import FactGraph
-from agent_pinboard.hooks import AgentPinBoardHooks, fire
 from agent_pinboard.models import EventNode, FactEdge, FactNode, IngestResult, ToolCallRecord
 from agent_pinboard.registry import register_model
 from agent_pinboard.session import (
@@ -57,6 +57,11 @@ from agent_pinboard.session import (
     lock_for,
     thread_id_from,
 )
+
+# Custom-event name dispatched after every successful ingest. Subscribers
+# implement ``BaseCallbackHandler.on_custom_event`` and filter on this
+# name. Payload schema: see ``_dispatch_ingest_event``.
+INGEST_EVENT = "agent_pinboard:ingest"
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +76,20 @@ def pin(
     many: bool = False,
     on_duplicate: OnDuplicate = OnDuplicate.ALWAYS,
     mask_args: list[str] | None = None,
-    hooks: AgentPinBoardHooks | None = None,
     response_transform: Callable[[Any, IngestResult], Any] | None = None,
     store_raw: bool = False,
 ) -> Callable[[BaseTool], BaseTool]:
     """Decorate a LangChain tool so its results are extracted into the fact graph.
+
+    Observability is wired through the standard LangChain callback chain
+    — pass any ``BaseCallbackHandler`` subclass via
+    ``config={"callbacks": [...]}`` on ``invoke`` / ``ainvoke``. After
+    every successful ingest the decorator dispatches an
+    ``agent_pinboard:ingest`` custom event whose payload carries the
+    delta and the post-ingest graph; handlers (e.g.
+    :class:`agent_pinboard.integrations.langfuse_hook.LangfuseHook`,
+    :class:`agent_pinboard.integrations.websocket_hook.WebSocketHook`)
+    pick it up via ``on_custom_event``.
 
     ``store_raw=True`` additionally stashes the tool's raw return JSON
     under ``("agent_pinboard", thread_id, "raw_events", event_id)`` for each
@@ -122,7 +136,6 @@ def pin(
             many=many,
             on_duplicate=on_duplicate,
             mask_args=masked,
-            hooks=hooks,
             response_transform=response_transform,
             tool_name=target.name,
             original_signature=inspect.signature(original_func),
@@ -148,7 +161,6 @@ class _Ctx:
     """Frozen-ish bag of decorator parameters, shared by the wrapper closure."""
 
     __slots__ = (
-        "hooks",
         "many",
         "mask_args",
         "model",
@@ -166,7 +178,6 @@ class _Ctx:
         many: bool,
         on_duplicate: OnDuplicate,
         mask_args: list[str],
-        hooks: AgentPinBoardHooks | None,
         response_transform: Callable[[Any, IngestResult], Any] | None,
         tool_name: str,
         original_signature: inspect.Signature,
@@ -176,7 +187,6 @@ class _Ctx:
         self.many = many
         self.on_duplicate = on_duplicate
         self.mask_args = mask_args
-        self.hooks = hooks
         self.response_transform = response_transform
         self.tool_name = tool_name
         self.original_signature = original_signature
@@ -230,7 +240,7 @@ def _make_sync_wrapper(original: Callable, ctx: _Ctx) -> Callable:
             _build_record(ctx, args_repr, _first_event(result), _summary(result), start),
         )
         _maybe_warn_soft_limit(store, thread_id)
-        _fire_post_ingest_hooks(ctx, payload, result, graph)
+        _dispatch_ingest_event(ctx, thread_id, payload, result, graph)
 
         return _apply_transform(ctx, raw, result)
 
@@ -272,7 +282,7 @@ def _make_async_wrapper(original: Callable, ctx: _Ctx) -> Callable:
             _build_record(ctx, args_repr, _first_event(result), _summary(result), start),
         )
         await _amaybe_warn_soft_limit(store, thread_id)
-        _fire_post_ingest_hooks(ctx, payload, result, graph)
+        await _adispatch_ingest_event(ctx, thread_id, payload, result, graph)
 
         out = _apply_transform(ctx, raw, result)
         if asyncio.iscoroutine(out):
@@ -429,29 +439,64 @@ def _build_payload(
     return payload, result
 
 
-def _fire_post_ingest_hooks(
-    ctx: _Ctx, payload: _Payload, result: IngestResult, graph: FactGraph
+def _build_ingest_payload(
+    ctx: _Ctx,
+    thread_id: str,
+    payload: _Payload,
+    result: IngestResult,
+    graph: FactGraph,
+) -> dict[str, Any]:
+    """Build the data dict for the ``agent_pinboard:ingest`` custom event."""
+    events: list[EventNode] = [n for n in payload.nodes if isinstance(n, EventNode)]
+    return {
+        "thread_id": thread_id,
+        "tool_name": ctx.tool_name,
+        "result": result,
+        "events": events,
+        "new_facts": list(payload.new_facts),
+        "linked_facts": list(payload.linked_facts),
+        "new_edges": list(payload.edges),
+        "graph": graph,
+    }
+
+
+def _dispatch_ingest_event(
+    ctx: _Ctx,
+    thread_id: str,
+    payload: _Payload,
+    result: IngestResult,
+    graph: FactGraph,
 ) -> None:
-    """Fire hooks outside the lock — order: per-pin, per-edge, then summary."""
-    for _ev_id, ev_node in _iter_events(payload):
-        fire(ctx.hooks, "on_node_added", ev_node)
-    for f in payload.new_facts:
-        fire(ctx.hooks, "on_node_added", f)
-    for f in payload.linked_facts:
-        # A linked fact might appear in multiple events of this batch; we
-        # report it once. For a per-event report a richer hook would be
-        # needed — out of scope.
-        fire(ctx.hooks, "on_link_found", f, _first_event(result) or "")
-    for e in payload.edges:
-        fire(ctx.hooks, "on_edge_added", e)
-    fire(ctx.hooks, "on_ingest_complete", result)
-    fire(ctx.hooks, "on_graph_changed", graph)
+    """Dispatch the per-ingest custom event into the LangChain callback chain.
+
+    Outside a runnable context (e.g. unit tests calling the wrapped tool
+    directly) ``dispatch_custom_event`` raises ``RuntimeError``; we
+    swallow it so the decorator stays usable in those settings.
+    """
+    data = _build_ingest_payload(ctx, thread_id, payload, result, graph)
+    try:
+        dispatch_custom_event(INGEST_EVENT, data)
+    except RuntimeError:
+        # No callback manager in scope — nothing to dispatch to.
+        pass
+    except Exception:  # noqa: BLE001 — observability never breaks ingestion
+        logger.error("agent_pinboard:ingest dispatch failed", exc_info=True)
 
 
-def _iter_events(payload: _Payload):
-    for n in payload.nodes:
-        if isinstance(n, EventNode):
-            yield n.id, n
+async def _adispatch_ingest_event(
+    ctx: _Ctx,
+    thread_id: str,
+    payload: _Payload,
+    result: IngestResult,
+    graph: FactGraph,
+) -> None:
+    data = _build_ingest_payload(ctx, thread_id, payload, result, graph)
+    try:
+        await adispatch_custom_event(INGEST_EVENT, data)
+    except RuntimeError:
+        pass
+    except Exception:  # noqa: BLE001
+        logger.error("agent_pinboard:ingest dispatch failed", exc_info=True)
 
 
 def _apply_transform(ctx: _Ctx, raw: Any, result: IngestResult) -> Any:

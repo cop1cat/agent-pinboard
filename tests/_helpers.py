@@ -34,7 +34,18 @@ def make_runner(tools: list[BaseTool], store: BaseStore, *, async_mode: bool = F
     return g.compile(store=store)
 
 
-def call(graph, tool_name: str, args: dict, thread_id: str, *, call_id: str = "c-1") -> str:
+def call(
+    graph,
+    tool_name: str,
+    args: dict,
+    thread_id: str,
+    *,
+    call_id: str = "c-1",
+    callbacks: list | None = None,
+) -> str:
+    config: dict = {"configurable": {"thread_id": thread_id}}
+    if callbacks:
+        config["callbacks"] = callbacks
     out = graph.invoke(
         {
             "messages": [
@@ -46,14 +57,23 @@ def call(graph, tool_name: str, args: dict, thread_id: str, *, call_id: str = "c
                 )
             ]
         },
-        config={"configurable": {"thread_id": thread_id}},
+        config=config,
     )
     return out["messages"][-1].content
 
 
 async def acall(
-    graph, tool_name: str, args: dict, thread_id: str, *, call_id: str = "c-1"
+    graph,
+    tool_name: str,
+    args: dict,
+    thread_id: str,
+    *,
+    call_id: str = "c-1",
+    callbacks: list | None = None,
 ) -> str:
+    config: dict = {"configurable": {"thread_id": thread_id}}
+    if callbacks:
+        config["callbacks"] = callbacks
     out = await graph.ainvoke(
         {
             "messages": [
@@ -65,6 +85,6 @@ async def acall(
                 )
             ]
         },
-        config={"configurable": {"thread_id": thread_id}},
+        config=config,
     )
     return out["messages"][-1].content

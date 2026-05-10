@@ -61,7 +61,10 @@ def _build(tools, store):
     return g.compile(store=store)
 
 
-def _call(graph, name: str, args: dict, thread_id: str = "tid") -> str:
+def _call(graph, name: str, args: dict, thread_id: str = "tid", *, callbacks: list | None = None) -> str:
+    config: dict = {"configurable": {"thread_id": thread_id}}
+    if callbacks:
+        config["callbacks"] = callbacks
     out = graph.invoke(
         {
             "messages": [
@@ -71,7 +74,7 @@ def _call(graph, name: str, args: dict, thread_id: str = "tid") -> str:
                 )
             ]
         },
-        config={"configurable": {"thread_id": thread_id}},
+        config=config,
     )
     return out["messages"][-1].content
 
@@ -207,16 +210,19 @@ def test_ac4_concurrent_ingestion(store: InMemoryStore) -> None:
 # --------------------------------------------------------------------------- #
 
 def test_ac5_duplicate_skip(store: InMemoryStore) -> None:
+    from langchain_core.callbacks import BaseCallbackHandler
+
+    from agent_pinboard.decorator import INGEST_EVENT
+
     invocations: list[int] = []
+    ingest_count = [0]
 
-    class H:
-        def on_ingest_complete(self, *_a, **_kw):
-            invocations.append(0)
+    class Recorder(BaseCallbackHandler):
+        def on_custom_event(self, name, data, *, run_id, tags=None, metadata=None, **kw):
+            if name == INGEST_EVENT:
+                ingest_count[0] += 1
 
-        def __getattr__(self, name):
-            return lambda *a, **kw: None
-
-    @pin(model=CloudTrailEvent, on_duplicate=OnDuplicate.SKIP, hooks=H())  # type: ignore[arg-type]
+    @pin(model=CloudTrailEvent, on_duplicate=OnDuplicate.SKIP)
     @tool
     def fetch(value: str, runtime: ToolRuntime) -> dict:
         """."""
@@ -224,12 +230,14 @@ def test_ac5_duplicate_skip(store: InMemoryStore) -> None:
         return {"src_ip": "1.2.3.4", "action": "x"}
 
     graph = _build([fetch], store)
-    _call(graph, "fetch", {"value": "x"})
-    _call(graph, "fetch", {"value": "x"})  # duplicate
-    _call(graph, "fetch", {"value": "y"})  # different
-    # Tool ran twice: first + third (second skipped). Hook fired only on real ingestion.
+    rec = Recorder()
+    _call(graph, "fetch", {"value": "x"}, callbacks=[rec])
+    _call(graph, "fetch", {"value": "x"}, callbacks=[rec])  # duplicate
+    _call(graph, "fetch", {"value": "y"}, callbacks=[rec])  # different
+    # Tool ran twice: first + third (second skipped). Ingest event fires
+    # only on real ingestion, not on the skipped duplicate.
     assert invocations.count(1) == 2
-    assert invocations.count(0) == 2
+    assert ingest_count[0] == 2
 
 
 # --------------------------------------------------------------------------- #

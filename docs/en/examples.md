@@ -140,16 +140,15 @@ from langgraph.prebuilt import ToolNode
 from langgraph.store.memory import InMemoryStore
 from typing_extensions import TypedDict
 
-from agent_pinboard import LoggingHook, make_graph_tools
+from agent_pinboard import make_graph_tools
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
-hooks = LoggingHook()
 agent_tools = [
     fetch_cloudtrail,
     vt_lookup,
-    *make_graph_tools(hooks=hooks),
+    *make_graph_tools(),
 ]
 
 g = StateGraph(State)
@@ -279,28 +278,30 @@ arbitrary strings the user picks.
 
 ## Example 3 — Custom hook (alerting on suspicious links)
 
-A hook that fires whenever a known "bad" IP gets linked, regardless of
-which tool surfaced it.
+A LangChain callback handler that fires whenever a known "bad" IP gets
+linked, regardless of which tool surfaced it.
 
 ```python
-from typing import override
-from agent_pinboard import AgentPinBoardHooks
-from agent_pinboard.models import EventId, FactNode
+from langchain_core.callbacks import BaseCallbackHandler
+from agent_pinboard.decorator import INGEST_EVENT
 
 KNOWN_BAD = {"185.220.101.42", "45.77.0.1"}
 
-class BadIPAlerter(AgentPinBoardHooks):
-    @override
-    def on_link_found(self, existing: FactNode, event_id: EventId) -> None:
-        if existing.node_type == "IP" and existing.value in KNOWN_BAD:
-            print(f"!!! KNOWN BAD IP RE-OBSERVED: {existing.value} (event {event_id})")
+class BadIPAlerter(BaseCallbackHandler):
+    def on_custom_event(self, name, data, *, run_id, tags=None, metadata=None, **kw):
+        if name != INGEST_EVENT:
+            return
+        first_event = data["result"].event_ids[0] if data["result"].event_ids else ""
+        for fact in data["linked_facts"]:
+            if fact.node_type == "IP" and fact.value in KNOWN_BAD:
+                print(f"!!! KNOWN BAD IP RE-OBSERVED: {fact.value} (event {first_event})")
 
-hooks = BadIPAlerter()
+agent.invoke(..., config={"callbacks": [BadIPAlerter()], "configurable": {...}})
 ```
 
-`on_link_found` fires when an existing fact gets a new edge from a new
-event — i.e. exactly when "we've seen this IP again, in a new context."
-Use it for live alerting without spending tokens on the LLM.
+`linked_facts` in the dispatched event names exactly the facts that
+this ingest re-linked — i.e. "we've seen this IP again, in a new
+context." Use it for live alerting without spending tokens on the LLM.
 
 ## Example 4 — Async tools
 
@@ -327,16 +328,16 @@ agent — AgentPinBoard handles each appropriately.
 
 ## Example 5 — Full LangGraph agent with a mock LLM
 
-`examples/agent_demo.py` ships a runnable end-to-end agent that uses
+`examples/agent_demo.ipynb` is a runnable end-to-end agent that uses
 `langchain.agents.create_agent` with a deterministic mock chat model.
 The mock walks a fixed plan (graph_summary → fetch_cloudtrail →
 vt_lookup → explore → find_path → timeline) so the demo runs without
 any API key.
 
-Run it:
+Open it in Jupyter (or read it directly on GitHub — it renders inline):
 
 ```bash
-uv run python examples/agent_demo.py
+jupyter notebook examples/agent_demo.ipynb
 ```
 
 To swap in a real LLM, replace `MockChatModel` with any LangChain
@@ -352,16 +353,21 @@ from agent_pinboard.integrations.langfuse_hook import LangfuseHook
 
 client = Langfuse(public_key="pk-…", secret_key="sk-…", host="https://cloud.langfuse.com")
 
-hooks = LangfuseHook(client, max_facts_in_snapshot=20)
+handler = LangfuseHook(client, max_facts_in_snapshot=20)
 
-@pin(model=CloudTrailEvent, many=True, hooks=hooks)
-@tool
-def fetch_cloudtrail(...): ...
+result = await agent.ainvoke(
+    {"messages": [...]},
+    config={
+        "callbacks": [handler],
+        "configurable": {"thread_id": "session-42"},
+    },
+)
 ```
 
-Each call to `fetch_cloudtrail` emits:
+Each `@pin`-tool call emits:
 
-* `agent_pinboard.ingest` span — quantitative summary of the ingest.
+* `agent_pinboard.ingest` span — quantitative summary of the ingest,
+  parented under the LangChain tool span.
 * `agent_pinboard.graph_snapshot` span — current graph as a Mermaid
   flowchart in metadata. Langfuse renders the Mermaid inline.
 

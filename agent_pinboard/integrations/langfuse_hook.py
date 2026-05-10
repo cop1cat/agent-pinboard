@@ -1,4 +1,4 @@
-"""Langfuse hook — sends ingest spans (with a Mermaid graph snapshot) to Langfuse.
+"""Langfuse callback handler — sends ingest spans (with a Mermaid graph snapshot) to Langfuse.
 
 Optional dependency. Install with::
 
@@ -11,36 +11,45 @@ Usage::
     from agent_pinboard.integrations.langfuse_hook import LangfuseHook
 
     client = Langfuse(public_key=..., secret_key=..., host=...)
-    hooks = LangfuseHook(client)
+    handler = LangfuseHook(client)
 
-    @pin(model=MyModel, hooks=hooks)
-    @tool
-    def my_tool(...): ...
+    result = await agent.ainvoke(
+        {"messages": [...]},
+        config={
+            "callbacks": [handler],
+            "configurable": {"thread_id": "session-42"},
+        },
+    )
 
-What the hook emits
--------------------
+What the handler emits
+----------------------
 
-* On every ``on_ingest_complete`` — a Langfuse span ``"agent_pinboard.ingest"``
-  with input = ingest summary, metadata = the per-ingest
-  ``IngestResult`` dataclass.
-* On every ``on_graph_changed`` — a Langfuse span
-  ``"agent_pinboard.graph_snapshot"`` whose metadata carries a
-  Mermaid-flowchart rendering of the current top-N facts and the events
-  that connect them. Langfuse renders Markdown/Mermaid in metadata,
-  giving you a visual graph alongside the trace.
+After every successful ``@pin`` ingest the decorator dispatches an
+``agent_pinboard:ingest`` custom event. ``LangfuseHook`` handles it by
+emitting:
 
-The hook never raises; failures are logged at ERROR (the underlying
-``AgentPinBoardHooks`` contract is preserved).
+* a span ``"agent_pinboard.ingest"`` with input = ingest summary,
+  metadata = the per-ingest ``IngestResult`` dataclass.
+* (optional) a span ``"agent_pinboard.graph_snapshot"`` whose metadata
+  carries a Mermaid-flowchart rendering of the current top-N facts and
+  the events that connect them. Langfuse renders Markdown/Mermaid in
+  metadata, giving you a visual graph alongside the trace.
+
+Failures inside the handler are logged at ERROR — the handler never
+breaks the surrounding agent run.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import asdict
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
+from langchain_core.callbacks import BaseCallbackHandler
+
+from agent_pinboard.decorator import INGEST_EVENT
 from agent_pinboard.graph import FactGraph
-from agent_pinboard.hooks import AgentPinBoardHooks
 from agent_pinboard.models import EVENT_NODE_TYPE, EventNode, FactNode, IngestResult
 
 if TYPE_CHECKING:
@@ -54,8 +63,14 @@ _DEPENDENCY_HINT = (
 )
 
 
-class LangfuseHook(AgentPinBoardHooks):
-    """AgentPinBoard hook that fans graph events into Langfuse spans."""
+class LangfuseHook(BaseCallbackHandler):
+    """LangChain callback handler that fans AgentPinBoard ingest events into Langfuse spans.
+
+    Pass an instance via ``config={"callbacks": [LangfuseHook(client)]}``
+    on ``agent.invoke`` / ``ainvoke``. The handler subscribes to the
+    ``agent_pinboard:ingest`` custom event emitted by ``@pin``-decorated
+    tools after each successful ingest.
+    """
 
     def __init__(
         self,
@@ -76,52 +91,74 @@ class LangfuseHook(AgentPinBoardHooks):
         self._max_facts = max_facts_in_snapshot
         self._emit_snapshots = emit_snapshots
 
-    @override
-    def on_ingest_complete(self, result: IngestResult) -> None:
-        try:
-            self._client.start_observation(
-                name="agent_pinboard.ingest",
-                as_type="span",
-                input=_summary(result),
-                output={
-                    "new_nodes": result.new_nodes,
-                    "linked_nodes": result.linked_nodes,
-                    "new_edges": result.new_edges,
-                },
-                metadata={
-                    "event_ids": result.event_ids,
-                    "warnings": result.warnings,
-                    "result": asdict(result),
-                },
-                level="WARNING" if result.warnings else "DEFAULT",
-            ).end()
-        except Exception:  # noqa: BLE001
-            logger.error("LangfuseHook.on_ingest_complete failed", exc_info=True)
+    # LangChain calls handlers regardless of which run they belong to;
+    # `raise_error=False` (the default) ensures exceptions inside any
+    # handler method do not break the run.
 
-    @override
-    def on_graph_changed(self, graph: FactGraph) -> None:
-        if not self._emit_snapshots:
+    def on_custom_event(
+        self,
+        name: str,
+        data: Any,
+        *,
+        run_id: UUID,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        if name != INGEST_EVENT:
             return
         try:
-            mermaid = render_mermaid(graph, max_facts=self._max_facts)
-            counts = {
-                t: len(ids)
-                for t, ids in graph.nodes_by_type.items()
-                if t != EVENT_NODE_TYPE
-            }
-            event_count = len(graph.nodes_by_type.get(EVENT_NODE_TYPE, set()))
-            self._client.start_observation(
-                name="agent_pinboard.graph_snapshot",
-                as_type="span",
-                input={"counts": counts, "events": event_count},
-                metadata={
-                    "mermaid": mermaid,
-                    "counts_by_type": counts,
-                    "event_count": event_count,
-                },
-            ).end()
+            self._handle_ingest(data)
         except Exception:  # noqa: BLE001
-            logger.error("LangfuseHook.on_graph_changed failed", exc_info=True)
+            logger.error("LangfuseHook ingest dispatch failed", exc_info=True)
+
+    # ------------------------------------------------------------------ #
+    # Internals.                                                         #
+    # ------------------------------------------------------------------ #
+
+    def _handle_ingest(self, data: dict[str, Any]) -> None:
+        result: IngestResult = data["result"]
+        graph: FactGraph = data["graph"]
+        self._emit_ingest_span(result)
+        if self._emit_snapshots:
+            self._emit_snapshot_span(graph)
+
+    def _emit_ingest_span(self, result: IngestResult) -> None:
+        self._client.start_observation(
+            name="agent_pinboard.ingest",
+            as_type="span",
+            input=_summary(result),
+            output={
+                "new_nodes": result.new_nodes,
+                "linked_nodes": result.linked_nodes,
+                "new_edges": result.new_edges,
+            },
+            metadata={
+                "event_ids": result.event_ids,
+                "warnings": result.warnings,
+                "result": asdict(result),
+            },
+            level="WARNING" if result.warnings else "DEFAULT",
+        ).end()
+
+    def _emit_snapshot_span(self, graph: FactGraph) -> None:
+        mermaid = render_mermaid(graph, max_facts=self._max_facts)
+        counts = {
+            t: len(ids)
+            for t, ids in graph.nodes_by_type.items()
+            if t != EVENT_NODE_TYPE
+        }
+        event_count = len(graph.nodes_by_type.get(EVENT_NODE_TYPE, set()))
+        self._client.start_observation(
+            name="agent_pinboard.graph_snapshot",
+            as_type="span",
+            input={"counts": counts, "events": event_count},
+            metadata={
+                "mermaid": mermaid,
+                "counts_by_type": counts,
+                "event_count": event_count,
+            },
+        ).end()
 
 
 # --------------------------------------------------------------------------- #

@@ -38,7 +38,7 @@ at `register_model` time.
 
 ## Decorator
 
-### `fact(*, model, many=False, on_duplicate=ALWAYS, mask_args=None, hooks=None, response_transform=None)`
+### `pin(*, model, many=False, on_duplicate=ALWAYS, mask_args=None, response_transform=None, store_raw=False)`
 
 Decorator factory for LangChain tools. **Apply above `@tool`.**
 
@@ -49,9 +49,17 @@ Decorator factory for LangChain tools. **Apply above `@tool`.**
 - `on_duplicate: OnDuplicate` — see enum below.
 - `mask_args: list[str] | None` — parameter names to replace with
   `"***"` in `args_repr`.
-- `hooks: AgentPinBoardHooks | None` — observability sink.
 - `response_transform: (raw, IngestResult) -> Any` — rewrite the
   tool's return for the LLM. Default keeps the original value.
+- `store_raw: bool` — if `True`, also stash the tool's raw return
+  under `("agent_pinboard", thread_id, "raw_events", event_id)` so
+  `get_evidence` can replay it.
+
+Observability is wired via standard LangChain callbacks — pass
+handlers through `config={"callbacks": [...]}` on `agent.invoke` /
+`ainvoke`. Each successful ingest dispatches an
+`agent_pinboard:ingest` custom event; see
+[hooks-and-config](./hooks-and-config.md).
 
 ## Enums
 
@@ -182,37 +190,30 @@ in-memory representation.
 
 ## Read-tools factory
 
-### `make_graph_tools(hooks=None) -> list[BaseTool]`
+### `make_graph_tools() -> list[BaseTool]`
 
 Returns the five Phase-1 graph tools: `explore`, `timeline`,
 `graph_summary`, `search_nodes`, `what_have_i_done`. See
 [graph-tools](./graph-tools.md) for signatures and behaviour.
 
-## Hooks
+## Observability
 
-### `AgentPinBoardHooks`
-
-Base class with no-op methods — override what you need:
+Observability is provided through the standard LangChain callback
+chain. After every successful `@pin` ingest the decorator dispatches
+a custom event:
 
 ```python
-class AgentPinBoardHooks:
-    def on_node_added(self, node: FactNode | EventNode) -> None: ...
-    def on_edge_added(self, edge: FactEdge) -> None: ...
-    def on_link_found(self, existing: FactNode, event_id: EventId) -> None: ...
-    def on_ingest_complete(self, result: IngestResult) -> None: ...
-    def on_graph_changed(self) -> None: ...
+from agent_pinboard.decorator import INGEST_EVENT  # "agent_pinboard:ingest"
 ```
 
-Every callback fires under `try/except`. Hook exceptions are logged
-and swallowed; ingestion never fails because of a hook.
-
-### `LoggingHook(level=logging.INFO)`
-
-Logs each callback to the standard `logging` module.
-
-### `CompositeHook(hooks: list[AgentPinBoardHooks])`
-
-Fans every callback out to the provided hooks in order.
+Pass any `BaseCallbackHandler` subclass via
+`config={"callbacks": [...]}` on `agent.invoke` / `ainvoke` — its
+`on_custom_event(name, data, *, run_id, ...)` receives the event with
+`name == INGEST_EVENT` and a `data` dict containing `thread_id`,
+`tool_name`, `result: IngestResult`, `events`, `new_facts`,
+`linked_facts`, `new_edges`, `graph`. See
+[hooks-and-config](./hooks-and-config.md) for the payload schema and
+the bundled `LangfuseHook` / `WebSocketHook` integrations.
 
 ## Configuration
 

@@ -1,14 +1,30 @@
-"""WebSocket hook — streams graph deltas to connected clients in real time.
+"""WebSocket callback handler — streams graph deltas to connected clients in real time.
 
 Optional dependency. Install with::
 
     uv add 'agent_pinboard[ws]'        # or:  pip install agent_pinboard[ws]
 
 Designed to drive a live visualisation (e.g. the Cytoscape.js demo in
-``examples/web/``). The hook itself is just a delta producer with a
+``examples/web/``). The handler itself is just a delta producer with a
 fan-out queue; the ``serve_websocket`` coroutine spins up an actual
 ``websockets.serve`` server that broadcasts the deltas to every
 connected client.
+
+Usage::
+
+    handler = WebSocketHook(thread_id_label="demo")
+
+    # Pass it to the agent through the LangChain callback chain:
+    await agent.ainvoke(
+        {"messages": [...]},
+        config={
+            "callbacks": [handler],
+            "configurable": {"thread_id": "session-42"},
+        },
+    )
+
+    # In a separate task, expose it on a WebSocket port:
+    asyncio.create_task(serve_websocket(handler, html_path="examples/web/index.html"))
 
 Wire-format (JSON, one message per line):
 
@@ -24,10 +40,11 @@ multiple are streaming through one server.
 
 Threading
 ---------
-The hook itself is sync (it's called from inside ``@pin`` ingestion
-under a threading lock). Deltas are pushed into a thread-safe queue;
-the asyncio server drains the queue from the loop thread. This keeps
-ingestion latency unaffected.
+The handler is sync — ``on_custom_event`` runs from inside a tool's
+callback chain (under ``@pin``'s read-modify-write lock for sync
+tools). Deltas are pushed into a thread-safe queue; the asyncio server
+drains the queue from the loop thread. This keeps ingestion latency
+unaffected.
 """
 
 from __future__ import annotations
@@ -38,14 +55,14 @@ import logging
 import queue
 from collections.abc import AsyncIterator
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any, override
+from typing import Any
+from uuid import UUID
 
+from langchain_core.callbacks import BaseCallbackHandler
+
+from agent_pinboard.decorator import INGEST_EVENT
 from agent_pinboard.graph import FactGraph
-from agent_pinboard.hooks import AgentPinBoardHooks
 from agent_pinboard.models import EVENT_NODE_TYPE, EventNode, FactEdge, FactNode, IngestResult
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -56,14 +73,16 @@ _DEPENDENCY_HINT = (
 
 
 # --------------------------------------------------------------------------- #
-# Hook                                                                         #
+# Handler                                                                     #
 # --------------------------------------------------------------------------- #
 
-class WebSocketHook(AgentPinBoardHooks):
-    """Pushes graph deltas into a queue for a separate WS server to drain.
+class WebSocketHook(BaseCallbackHandler):
+    """LangChain callback handler that pushes graph deltas into a queue
+    for a separate WS server to drain.
 
-    Construct one hook per agent and pass it both to ``@pin(hooks=...)``
-    *and* to ``serve_websocket(hook, ...)`` (in the asyncio main).
+    Construct one handler per agent and pass it both through
+    ``config={"callbacks": [...]}`` *and* to ``serve_websocket(handler, ...)``
+    in the asyncio main loop.
 
     Parameters
     ----------
@@ -103,37 +122,55 @@ class WebSocketHook(AgentPinBoardHooks):
         """Most recent full snapshot, or ``None`` if no ingest has happened."""
         return self._latest_snapshot
 
-    # ---- AgentPinBoardHooks overrides ----------------------------------------
+    # ---- BaseCallbackHandler ------------------------------------------------
 
-    @override
-    def on_node_added(self, node: FactNode | EventNode) -> None:
-        self._enqueue({"type": "node_added", "node": _node_to_payload(node)})
+    def on_custom_event(
+        self,
+        name: str,
+        data: Any,
+        *,
+        run_id: UUID,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        if name != INGEST_EVENT:
+            return
+        try:
+            self._handle_ingest(data)
+        except Exception:  # noqa: BLE001
+            logger.error("WebSocketHook ingest dispatch failed", exc_info=True)
 
-    @override
-    def on_edge_added(self, edge: FactEdge) -> None:
-        self._enqueue({"type": "edge_added", "edge": _edge_to_payload(edge)})
+    # ---- internals -------------------------------------------------------
 
-    @override
-    def on_link_found(self, existing: FactNode, event_id: str) -> None:
-        self._enqueue({
-            "type": "link_found",
-            "node_id": existing.id,
-            "event_id": event_id,
-        })
+    def _handle_ingest(self, data: dict[str, Any]) -> None:
+        events: list[EventNode] = data["events"]
+        new_facts: list[FactNode] = data["new_facts"]
+        linked_facts: list[FactNode] = data["linked_facts"]
+        new_edges: list[FactEdge] = data["new_edges"]
+        result: IngestResult = data["result"]
+        graph: FactGraph = data["graph"]
+        first_event_id = result.event_ids[0] if result.event_ids else ""
 
-    @override
-    def on_ingest_complete(self, result: IngestResult) -> None:
+        for ev in events:
+            self._enqueue({"type": "node_added", "node": _node_to_payload(ev)})
+        for fact in new_facts:
+            self._enqueue({"type": "node_added", "node": _node_to_payload(fact)})
+        for fact in linked_facts:
+            self._enqueue(
+                {
+                    "type": "link_found",
+                    "node_id": fact.id,
+                    "event_id": first_event_id,
+                }
+            )
+        for edge in new_edges:
+            self._enqueue({"type": "edge_added", "edge": _edge_to_payload(edge)})
         self._enqueue({"type": "ingest_complete", "result": asdict(result)})
-
-    @override
-    def on_graph_changed(self, graph: FactGraph) -> None:
-        snapshot = _build_snapshot(graph, thread_id_label=self._label)
-        self._latest_snapshot = snapshot
         # Snapshot is always sent on connect; we don't push it to the
         # delta queue because it would dwarf the deltas. Clients get the
         # current snapshot at handshake and apply deltas thereafter.
-
-    # ---- internals -------------------------------------------------------
+        self._latest_snapshot = _build_snapshot(graph, thread_id_label=self._label)
 
     def _enqueue(self, delta: dict[str, Any]) -> None:
         delta["thread_id"] = self._label
@@ -157,14 +194,14 @@ class WebSocketHook(AgentPinBoardHooks):
 # --------------------------------------------------------------------------- #
 
 async def serve_websocket(
-    hook: WebSocketHook,
+    handler: WebSocketHook,
     *,
     host: str = "localhost",
     port: int = 8765,
     poll_interval: float = 0.05,
     html_path: str | None = None,
 ) -> None:
-    """Run a WebSocket server that broadcasts ``hook``'s deltas to all clients.
+    """Run a WebSocket server that broadcasts ``handler``'s deltas to all clients.
 
     Each client receives the latest snapshot on connect (if any), then
     every subsequent delta. The server runs forever — wrap in a task or
@@ -176,27 +213,6 @@ async def serve_websocket(
     page instead of the raw "you need a WebSocket client" error. The
     same port still serves the WS upgrade for ``ws://localhost:<port>/``
     requests.
-
-    Example::
-
-        import asyncio
-        from agent_pinboard.integrations.websocket_hook import (
-            WebSocketHook, serve_websocket,
-        )
-
-        hook = WebSocketHook(thread_id_label="demo")
-
-        @pin(model=MyModel, hooks=hook)
-        @tool
-        def my_tool(...): ...
-
-        async def main():
-            server = asyncio.create_task(serve_websocket(
-                hook, html_path="examples/web/index.html",
-            ))
-            # ... drive your agent ...
-
-        asyncio.run(main())
     """
     try:
         from websockets.asyncio.server import serve  # type: ignore[import-not-found]
@@ -238,10 +254,10 @@ async def serve_websocket(
             body=b"not found\n",
         )
 
-    async def handler(ws: Any) -> None:
+    async def ws_handler(ws: Any) -> None:
         clients.add(ws)
         try:
-            snap = hook.latest_snapshot()
+            snap = handler.latest_snapshot()
             if snap is not None:
                 await ws.send(json.dumps(snap))
             try:
@@ -255,7 +271,7 @@ async def serve_websocket(
     async def broadcaster() -> None:
         while True:
             await asyncio.sleep(poll_interval)
-            deltas = hook.drain_pending()
+            deltas = handler.drain_pending()
             if not deltas or not clients:
                 continue
             messages = [json.dumps(d) for d in deltas]
@@ -270,7 +286,7 @@ async def serve_websocket(
             for ws in dead:
                 clients.discard(ws)
 
-    async with serve(handler, host, port, process_request=http_route):
+    async with serve(ws_handler, host, port, process_request=http_route):
         logger.info("AgentPinBoard server on http://%s:%d  (ws on same port)", host, port)
         await broadcaster()
 

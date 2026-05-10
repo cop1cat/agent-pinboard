@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
 from agent_pinboard import Entity, EventNode, FactEdge, FactGraph, IngestResult
+from agent_pinboard.decorator import INGEST_EVENT
 
 pytest.importorskip("langfuse")
 
@@ -32,14 +34,29 @@ def graph() -> FactGraph:
     return g
 
 
+def _payload(graph: FactGraph, *, result: IngestResult | None = None) -> dict:
+    return {
+        "thread_id": "tid",
+        "tool_name": "fetch",
+        "result": result or IngestResult(event_ids=["e-1"], new_nodes=2, linked_nodes=1, new_edges=3),
+        "events": [],
+        "new_facts": [],
+        "linked_facts": [],
+        "new_edges": [],
+        "graph": graph,
+    }
+
+
+def _fire(handler: LangfuseHook, payload: dict) -> None:
+    handler.on_custom_event(INGEST_EVENT, payload, run_id=uuid4())
+
+
 class TestMermaidRendering:
     def test_basic_structure(self, graph: FactGraph) -> None:
         out = render_mermaid(graph)
         assert out.startswith("flowchart LR")
-        # Both facts present.
         assert "IP: 1.1.1.1" in out
         assert "User: alice" in out
-        # Event present and connected to both facts.
         assert "fetch@12:00:00" in out
         assert "-->" in out
 
@@ -53,7 +70,6 @@ class TestMermaidRendering:
         assert "... and" in out and "more facts" in out
 
     def test_orphan_events_omitted(self, graph: FactGraph) -> None:
-        # Add an event with NO facts attached.
         graph.add_event(EventNode(
             id="e-orphan", source_tool="lonely",
             timestamp=datetime(2026, 1, 1, 12, 5, 0, tzinfo=UTC),
@@ -72,52 +88,64 @@ class TestMermaidRendering:
 
 
 class TestLangfuseHookEmits:
-    def test_on_ingest_complete_calls_start_observation(self) -> None:
+    def test_ingest_event_calls_start_observation(self, graph: FactGraph) -> None:
         client = MagicMock()
         client.start_observation.return_value = MagicMock()
 
-        hook = LangfuseHook(client, emit_snapshots=False)
-        result = IngestResult(event_ids=["e-1"], new_nodes=2, linked_nodes=1, new_edges=3)
-        hook.on_ingest_complete(result)
+        handler = LangfuseHook(client, emit_snapshots=False)
+        _fire(handler, _payload(graph))
 
         assert client.start_observation.called
-        kwargs = client.start_observation.call_args.kwargs
+        kwargs = client.start_observation.call_args_list[0].kwargs
         assert kwargs["name"] == "agent_pinboard.ingest"
         assert kwargs["output"]["new_nodes"] == 2
         assert kwargs["metadata"]["event_ids"] == ["e-1"]
 
-    def test_on_graph_changed_emits_mermaid(self, graph: FactGraph) -> None:
+    def test_ingest_event_with_snapshots_emits_two_spans(self, graph: FactGraph) -> None:
         client = MagicMock()
         client.start_observation.return_value = MagicMock()
 
-        hook = LangfuseHook(client)
-        hook.on_graph_changed(graph)
+        handler = LangfuseHook(client, emit_snapshots=True)
+        _fire(handler, _payload(graph))
 
-        # Two calls would be made if both ingest+snapshot fired together,
-        # but on_graph_changed alone only emits the snapshot.
-        assert client.start_observation.called
-        kwargs = client.start_observation.call_args.kwargs
-        assert kwargs["name"] == "agent_pinboard.graph_snapshot"
-        assert "mermaid" in kwargs["metadata"]
-        assert kwargs["metadata"]["mermaid"].startswith("flowchart LR")
+        names = [c.kwargs["name"] for c in client.start_observation.call_args_list]
+        assert "agent_pinboard.ingest" in names
+        assert "agent_pinboard.graph_snapshot" in names
+        snap_call = next(c for c in client.start_observation.call_args_list
+                         if c.kwargs["name"] == "agent_pinboard.graph_snapshot")
+        assert snap_call.kwargs["metadata"]["mermaid"].startswith("flowchart LR")
 
-    def test_emit_snapshots_false_skips_graph_calls(self, graph: FactGraph) -> None:
-        client = MagicMock()
-        hook = LangfuseHook(client, emit_snapshots=False)
-        hook.on_graph_changed(graph)
-        assert not client.start_observation.called
-
-    def test_warnings_set_warning_level(self) -> None:
+    def test_emit_snapshots_false_only_emits_ingest(self, graph: FactGraph) -> None:
         client = MagicMock()
         client.start_observation.return_value = MagicMock()
 
-        hook = LangfuseHook(client, emit_snapshots=False)
+        handler = LangfuseHook(client, emit_snapshots=False)
+        _fire(handler, _payload(graph))
+
+        names = [c.kwargs["name"] for c in client.start_observation.call_args_list]
+        assert names == ["agent_pinboard.ingest"]
+
+    def test_warnings_set_warning_level(self, graph: FactGraph) -> None:
+        client = MagicMock()
+        client.start_observation.return_value = MagicMock()
+
+        handler = LangfuseHook(client, emit_snapshots=False)
         result = IngestResult(
             event_ids=["e"], new_nodes=0, linked_nodes=0, new_edges=0,
             warnings=["empty canonical: x"],
         )
-        hook.on_ingest_complete(result)
-        assert client.start_observation.call_args.kwargs["level"] == "WARNING"
+        _fire(handler, _payload(graph, result=result))
+
+        kwargs = client.start_observation.call_args_list[0].kwargs
+        assert kwargs["level"] == "WARNING"
+
+    def test_other_event_names_ignored(self, graph: FactGraph) -> None:
+        client = MagicMock()
+        handler = LangfuseHook(client)
+        handler.on_custom_event(
+            "some_other_event", _payload(graph), run_id=uuid4(),
+        )
+        assert not client.start_observation.called
 
 
 class TestLangfuseHookIsolation:
@@ -127,17 +155,12 @@ class TestLangfuseHookIsolation:
         client = MagicMock()
         client.start_observation.side_effect = RuntimeError("LF down")
 
-        hook = LangfuseHook(client)
+        handler = LangfuseHook(client)
         with caplog.at_level(logging.ERROR):
-            hook.on_ingest_complete(
-                IngestResult(event_ids=[], new_nodes=0, linked_nodes=0, new_edges=0)
-            )
-            hook.on_graph_changed(graph)
+            _fire(handler, _payload(graph))
 
-        # Both callbacks attempted; both logged ERRORs; nothing raised.
         msgs = [r.message for r in caplog.records]
-        assert any("on_ingest_complete failed" in m for m in msgs)
-        assert any("on_graph_changed failed" in m for m in msgs)
+        assert any("LangfuseHook ingest dispatch failed" in m for m in msgs)
 
 
 class TestLangfuseHookConstructor:

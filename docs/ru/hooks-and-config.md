@@ -1,164 +1,170 @@
-# Хуки и конфигурация
+# Колбэки и конфигурация
 
-## Хуки
+## Observability через LangChain callbacks
 
-`AgentPinBoardHooks` — обычный класс. Наследуйтесь и переопределяйте
-только те методы, которые нужны. Каждый callback обёрнут в
-`try/except`: **хук, который кинул, никогда не ломает ingestion** —
-ошибка логируется на ERROR, ingestion продолжается.
+AgentPinBoard включается в **стандартный callback-канал LangChain**.
+После каждого успешного `@pin`-ингеста декоратор диспатчит custom
+event `agent_pinboard:ingest` во все `BaseCallbackHandler`-ы, которые
+caller зарегистрировал через `config={"callbacks": [...]}` на
+`agent.invoke` / `ainvoke`.
 
-```python
-from typing import override
-from agent_pinboard import AgentPinBoardHooks
-from agent_pinboard.models import EventId, FactNode, IngestResult
+Тот же механизм, который отдаёт `on_tool_start` / `on_tool_end` /
+`on_llm_start`, отдаёт и события AgentPinBoard — handler получает
+единый поток, и каждый event привязан к LangChain-run'у, в котором
+произошёл (так что Langfuse-спаны естественно вкладываются в
+tool-span, а не висят отдельным трейсом).
 
-class MyHook(AgentPinBoardHooks):
-    @override
-    def on_node_added(self, node) -> None:
-        print(f"new node: {node.node_type}")
-
-    @override
-    def on_link_found(self, existing: FactNode, event_id: EventId) -> None:
-        print(f"linked existing: {existing.value}")
-
-    @override
-    def on_ingest_complete(self, result: IngestResult) -> None:
-        print(f"+{result.new_nodes} nodes, {len(result.warnings)} warnings")
-```
-
-`@typing.override` — декоратор Python 3.12. Typechecker поймает
-опечатки в именах переопределяемых методов.
-
-### Доступные коллбэки
-
-| Callback | Когда вызывается |
-|---|---|
-| `on_node_added(node)` | Создан новый `FactNode` или `EventNode` |
-| `on_edge_added(edge)` | Создан новый `FactEdge` |
-| `on_link_found(existing, event_id)` | Существующий `FactNode` залинкован новым событием (один вызов на каждый distinct linked факт за ingest) |
-| `on_ingest_complete(result)` | Один вызов `@pin` отработал успешно |
-| `on_graph_changed()` | Грубый сигнал «граф изменился», один раз за ingest |
-
-### Готовые реализации
+### Минимальный handler
 
 ```python
-from agent_pinboard import LoggingHook, CompositeHook
-import logging
+from langchain_core.callbacks import BaseCallbackHandler
+from agent_pinboard.decorator import INGEST_EVENT
 
-# Логирует каждый callback на INFO.
-log_hook = LoggingHook(level=logging.INFO)
-
-# Раскидывает на несколько хуков; каждый изолирован try/except.
-combined = CompositeHook([log_hook, MyHook()])
+class PrintIngest(BaseCallbackHandler):
+    def on_custom_event(self, name, data, *, run_id, tags=None, metadata=None, **kw):
+        if name != INGEST_EVENT:
+            return
+        result = data["result"]
+        print(
+            f"{data['tool_name']}: +{result.new_nodes} new, "
+            f"+{result.linked_nodes} linked, +{result.new_edges} edges"
+        )
 ```
 
-`LangfuseHook` и `WebSocketHook` поставляются как опциональные
-интеграции — см. ниже обе.
+Подключение на каждом invoke:
 
-### `LangfuseHook`
+```python
+agent.invoke(
+    {"messages": [...]},
+    config={
+        "configurable": {"thread_id": "session-42"},
+        "callbacks": [PrintIngest()],
+    },
+)
+```
 
-Опциональная зависимость. Установка:
+### Payload `agent_pinboard:ingest`
+
+`data` содержит дельту ингеста и ссылку на свежезагруженный граф:
+
+| Ключ | Тип | Заметки |
+|---|---|---|
+| `thread_id` | `str` | Сессия, в которую упал ингест |
+| `tool_name` | `str` | Имя задекорированного тула |
+| `result` | `IngestResult` | `event_ids`, `new_nodes`, `linked_nodes`, `new_edges`, `warnings` |
+| `events` | `list[EventNode]` | Один на вызов (или один на элемент при `many=True`) |
+| `new_facts` | `list[FactNode]` | Свежесозданные факты |
+| `linked_facts` | `list[FactNode]` | Существующие факты, на которые этот ингест навесил линк |
+| `new_edges` | `list[FactEdge]` | По одному на каждое occurrence факта в модели |
+| `graph` | `FactGraph` | Граф после ингеста (in-memory, view этого вызова) |
+
+Handler, которому нужна гранулярность по нодам, проходит по `events`
+/ `new_facts` / `linked_facts`; handler, которому нужен общий сигнал
+"что-то изменилось" — смотрит на `result`.
+
+### Изоляция ошибок
+
+Декоратор оборачивает `dispatch_custom_event` в `try/except`: handler,
+который кинул исключение, **не ломает ingestion** — exception
+логируется на ERROR. Payload `agent_pinboard:ingest` всегда отражает
+успешно записанную дельту, даже если handler потом упадёт.
+
+## `LangfuseHook`
+
+Опциональная зависимость:
 
 ```bash
 uv add 'agent_pinboard[langfuse]'        # или: pip install agent_pinboard[langfuse]
 ```
-
-Использование:
 
 ```python
 from langfuse import Langfuse
 from agent_pinboard.integrations.langfuse_hook import LangfuseHook
 
 client = Langfuse(public_key=..., secret_key=..., host=...)
-hooks = LangfuseHook(client)
+handler = LangfuseHook(client)
 
-@pin(model=CloudTrailEvent, many=True, hooks=hooks)
-@tool
-def fetch_cloudtrail(...): ...
+result = await agent.ainvoke(
+    {"messages": [...]},
+    config={
+        "callbacks": [handler],
+        "configurable": {"thread_id": "session-42"},
+    },
+)
 ```
 
 Что эмитит:
 
-* На каждый `on_ingest_complete` — Langfuse span `agent_pinboard.ingest`
-  с per-call дельтой (`new_nodes`, `linked_nodes`, `new_edges`,
-  warnings).
-* На каждый `on_graph_changed` — span `agent_pinboard.graph_snapshot`,
-  чья metadata содержит Mermaid-flowchart с top-фактами и связывающими
-  их событиями. Langfuse рендерит Mermaid в metadata — получаете
-  визуальный граф рядом с trace.
+* span `agent_pinboard.ingest` на каждый ингест — с per-call дельтой
+  (`new_nodes`, `linked_nodes`, `new_edges`, warnings).
+* (опционально, по умолчанию включено) span
+  `agent_pinboard.graph_snapshot` на каждый ингест с Mermaid-схемой
+  топ-N фактов и связанных событий в metadata. Langfuse рендерит
+  Mermaid в metadata — получаете визуальный граф рядом с трейсом.
+
+Оба спана наследуют parent от текущего LangChain tool-span — дерево
+трейса остаётся связным.
 
 Параметры конструктора:
 
-* `max_facts_in_snapshot=30` — сколько top-фактов (по числу событий)
-  включать в каждый Mermaid-снимок.
-* `emit_snapshots=False` — выключить снимки, оставить только ingest
-  spans (дешевле, меньше traffic'a в Langfuse).
+* `max_facts_in_snapshot=30` — top-N фактов в каждом Mermaid-рендере.
+* `emit_snapshots=False` — отключить snapshot-span (дешевле, меньше
+  трафика в Langfuse).
 
-Хук никогда не падает — ошибки логируются на ERROR (контракт
-`AgentPinBoardHooks` log-and-continue сохранён).
+Handler глотает свои исключения — failure логируется на ERROR, agent
+run продолжается.
 
-### `WebSocketHook`
+## `WebSocketHook`
 
-Опциональная зависимость. Установка:
+Опциональная зависимость:
 
 ```bash
 uv add 'agent_pinboard[ws]'        # или: pip install agent_pinboard[ws]
 ```
 
-Хук собирает каждое изменение графа в thread-safe очередь;
-``serve_websocket(hook, ...)`` поднимает asyncio WebSocket-сервер,
-который рассылает каждую дельту (и one-off snapshot на коннект)
-всем подключённым клиентам.
+Handler превращает каждый `agent_pinboard:ingest` в поток JSON-дельт
+(одна на ноду, ребро, link, плюс финальный `ingest_complete`) и
+кладёт в thread-safe очередь. `serve_websocket(handler, ...)` запускает
+asyncio WebSocket-сервер, который раздаёт каждую дельту всем
+подключённым клиентам.
 
 ```python
 import asyncio
+from langchain.agents import create_agent
 from agent_pinboard import pin, make_graph_tools
 from agent_pinboard.integrations.websocket_hook import (
     WebSocketHook, serve_websocket,
 )
 
-hook = WebSocketHook(thread_id_label="investigation-001")
-
-@pin(model=CloudTrailEvent, many=True, hooks=hook)
-@tool
-def fetch_cloudtrail(...): ...
+handler = WebSocketHook(thread_id_label="investigation-001")
 
 async def main():
-    server = asyncio.create_task(serve_websocket(hook, port=8765))
-    # ... драйвите агента (sync-работа через asyncio.to_thread) ...
+    server = asyncio.create_task(serve_websocket(handler, port=8765))
+    agent = create_agent(...)
+    await asyncio.to_thread(
+        agent.invoke,
+        {"messages": [...]},
+        {
+            "configurable": {"thread_id": "investigation-001"},
+            "callbacks": [handler],
+        },
+    )
     await server
 
 asyncio.run(main())
 ```
 
-Wire-формат (JSON, одно сообщение на строку):
+Wire-формат (JSON, по сообщению на строку):
 
-* `snapshot` — полный дамп графа на коннект.
+* `snapshot` — полный дамп графа на connect.
 * `node_added` / `edge_added` — инкрементальные изменения.
-* `link_found` — существующий факт перелинкован новым событием.
-* `ingest_complete` — `@pin`-вызов отработал успешно.
+* `link_found` — линк к существующему факту из нового события.
+* `ingest_complete` — `@pin`-вызов завершился успешно.
 
-Готовый Cytoscape.js фронтенд — `examples/web/index.html`,
-запускалка — `examples/web/server_demo.py`. Запустите и откройте
-HTML в браузере, чтобы видеть как граф строится в реальном времени.
-
-Хук не падает; как и остальные, исключения WS-слоя логируются и
-проглатываются.
-
-### Подключение хуков к тулу
-
-Передавайте хук в `@pin` (per-tool) и в `make_graph_tools` (для
-read-тулов, где они пока no-op):
-
-```python
-hooks = MyHook()
-
-@pin(model=CloudTrailEvent, many=True, hooks=hooks)
-@tool
-def fetch_cloudtrail(...): ...
-
-agent_tools = [fetch_cloudtrail, *make_graph_tools(hooks=hooks)]
-```
+Готовый Cytoscape.js-фронтенд лежит в `examples/web/index.html`,
+живой demo-ноутбук `examples/web/server_demo.ipynb` собирает всё
+вместе — запустите его и откройте `http://localhost:8765/` в браузере,
+чтобы видеть, как граф растёт в реальном времени.
 
 ## `configure()` — глобальные настройки процесса
 
@@ -168,48 +174,49 @@ from agent_pinboard import configure
 configure(tool_log_soft_limit=200)
 ```
 
-Единственная настройка в Phase 1 — `tool_log_soft_limit` (дефолт 500).
-Когда per-session tool-call лог превышает порог — пишется warning,
-жёсткого cap нет. Warning — в основном сигнал «LLM ходит по кругу»,
-не «storage перегружен».
+Единственная настройка в Phase 1 — `tool_log_soft_limit` (по
+умолчанию 500). Когда per-session tool-call log превышает порог,
+пишется warning; жёсткого cap нет. Warning — сигнал что "LLM ходит
+по кругу", а не что storage перегружен.
 
-`configure()` — **process-global, mutable state**. Per-session
-override вне scope; для них — пишите хук, который дропает записи.
+`configure()` — **process-global mutable state**. Per-session
+override out of scope; для этого пишите callback-handler, фильтрующий
+записи.
 
 ## Tool log
 
 Каждый `@pin`-вызов добавляет один `ToolCallRecord` в per-session
-лог под namespace `("agent_pinboard", thread_id, "tool_calls", record_id)`:
+log под namespace
+`("agent_pinboard", thread_id, "tool_calls", record_id)`:
 
 ```python
 @dataclass(slots=True, frozen=True)
 class ToolCallRecord:
     tool_name: str
-    args_repr: str           # canonical JSON, детерминированный для dedup
+    args_repr: str           # canonical JSON, deterministic для дедупа
     timestamp: datetime
-    event_id: EventId | None # None для дубликатов, не сделавших ingest
+    event_id: EventId | None # None для duplicates без ingestion
     summary: str             # "+2 nodes, +1 linked, +3 edges" / "duplicate (skipped)" / "error: ..."
     duration_ms: int
 ```
 
-Агент читает лог через `what_have_i_done(...)`. Две причины пользы:
+Агент читает log через `what_have_i_done(...)`. Зачем log:
 
-1. LLM может спросить «я уже запрашивал VirusTotal на этот IP?» без
-   re-run'а вызова. Вместе с `on_duplicate=OnDuplicate.SKIP` второй
-   вызов просто вернёт маркер-строку.
-2. После долгой сессии можно сделать post-mortem: какие тулы шли,
-   в каком порядке, что они дали.
+1. LLM может спросить "уже искал этот IP в VirusTotal?" не вызывая
+   тул заново. С `on_duplicate=OnDuplicate.SKIP` дублирующий вызов
+   возвращает marker-строку.
+2. Post-mortem длинной сессии — какие тулы шли в каком порядке и что
+   возвращали.
 
 ### Представление аргументов
 
-`args_repr` — стабильная JSON-строка из позиционных и keyword-аргументов
-вызова, с:
+`args_repr` — стабильная JSON-строка, построенная из позиционных и
+keyword-аргументов вызова, с:
 
-- исключённым `ToolRuntime` (не сериализуемый, и per-session всё
-  равно),
-- отсортированными `kwargs` (`f(a=1, b=2)` и `f(b=2, a=1)` дают
-  одинаковую строку),
-- Pydantic `BaseModel` через `model_dump(mode="json")`,
+- `ToolRuntime` исключён (несериализуем, и per-session всё равно),
+- ключи `kwargs` сортируются (`f(a=1, b=2)` и `f(b=2, a=1)`
+  столкнутся при дедупликации),
+- Pydantic `BaseModel` дампятся через `model_dump(mode="json")`,
 - остальное — через `json.dumps(..., default=str)`.
 
 Это то, против чего сравнивается duplicate-detection (`on_duplicate`).

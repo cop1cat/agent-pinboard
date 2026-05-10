@@ -10,7 +10,7 @@ Key sources of truth:
 
 - `README.md` — the authoritative technical spec (ТЗ). Every architectural decision is recorded there with rationale. **Treat it as load-bearing — do not drift from it silently.** If you want to deviate, surface the tradeoff in conversation first.
 - `REASEARCH.md` (the typo is intentional, the filename stays) — prior-art / landscape research. Its API examples are outdated (the early `Annotated[T, Fact(...)]` shape, replaced long ago by `node(type=Entity, ...)`). Read for context, not as API reference.
-- `TODO.md` — **not** a phase roadmap anymore (all three phases are done); a running list of known limitations, desired follow-ups, and explicit refactor candidates. Priority 1 right now is a `LangfuseHook` redesign — the current implementation works but produces disconnected traces and two spans per ingest, which is noisy in a real Langfuse UI.
+- `TODO.md` — **not** a phase roadmap anymore (all three phases are done); a running list of known limitations, desired follow-ups, and explicit refactor candidates.
 - `docs/` — user-facing docs in **English** (`docs/en/`) and **Russian** (`docs/ru/`). Eight pages each: index, quickstart, concepts, extraction-rules, graph-tools, hooks-and-config, pitfalls, api-reference, examples. **Update both languages when changing user-facing behaviour.**
 - The equivalent sanity checks now live inside the test suite: `tests/test_acceptance.py` covers the README §16 acceptance criteria end-to-end, and `tests/test_decorator.py` / `tests/test_tools.py` exercise real `ToolRuntime` injection via `ToolNode` (the assumptions that the deleted `langgraph_check.py` used to verify).
 
@@ -30,8 +30,8 @@ uv run pytest tests/test_<file>.py::TestClass::test_name -v   # single test
 uv run ruff check agent_pinboard/               # lint
 uv run ruff check agent_pinboard/ --fix         # auto-fix
 
-uv run python examples/agent_demo.py      # full agent with mock LLM
-uv run python examples/web/server_demo.py # WS server + agent (then open http://localhost:8765/)
+jupyter notebook examples/agent_demo.ipynb        # full agent with mock LLM
+jupyter notebook examples/web/server_demo.ipynb   # WS server + agent (then open http://localhost:8765/)
 ```
 
 **Pytest can hang on first import in some shells.** Always launch long-running test commands with `run_in_background: true` and use `TaskOutput` to wait — never `sleep` in the foreground. The first run in a fresh worker may take 5-10 seconds while imports warm up; subsequent runs are sub-second.
@@ -106,9 +106,9 @@ If a change "while you're here" tries to add any of these, surface it as a real 
 - `store.py` — sharded sync + async I/O over LangGraph `BaseStore`
 - `session.py` — per-`thread_id` `RLock` + `thread_id_from(runtime)` (no graph cache; every load goes through `store.py::load_graph`)
 - `tools.py` — seven graph tools (`make_graph_tools`)
-- `hooks.py`, `config.py`, `registry.py` — supporting machinery
-- `integrations/langfuse_hook.py` — `LangfuseHook` + `render_mermaid` (optional `agent_pinboard[langfuse]`)
-- `integrations/websocket_hook.py` — `WebSocketHook` + `serve_websocket` (optional `agent_pinboard[ws]`)
+- `config.py`, `registry.py` — supporting machinery
+- `integrations/langfuse_hook.py` — `LangfuseHook` (LangChain `BaseCallbackHandler`) + `render_mermaid` (optional `agent_pinboard[langfuse]`)
+- `integrations/websocket_hook.py` — `WebSocketHook` (LangChain `BaseCallbackHandler`) + `serve_websocket` (optional `agent_pinboard[ws]`)
 
 **Tests (`tests/`):**
 - One file per module (`test_<name>.py`) plus `test_acceptance.py` for the §16 ACs and `test_review_fixes.py` for regression coverage of every reviewer-found bug.
@@ -116,8 +116,9 @@ If a change "while you're here" tries to add any of these, surface it as a real 
 - `tests/_helpers.py` — shared `make_runner` / `call` for driving `@pin`-tools through a tiny `ToolNode`-driven graph.
 
 **Examples (`examples/`):**
-- `agent_demo.py` — minimal end-to-end agent with `MockChatModel` walking a 6-step plan.
-- `web/server_demo.py` + `web/index.html` — same agent, but with `WebSocketHook` + Cytoscape.js live visualisation.
+- `agent_demo.ipynb` — minimal end-to-end agent with `MockChatModel` walking a 6-step plan.
+- `web/server_demo.ipynb` + `web/index.html` — same agent, but with `WebSocketHook` (LangChain `BaseCallbackHandler`) + Cytoscape.js live visualisation.
+- `langfuse_demo.ipynb` — minimal LangfuseHook callback-handler example.
 
 **User docs (`docs/`):**
 - English: `docs/en/{quickstart,concepts,extraction-rules,graph-tools,hooks-and-config,pitfalls,api-reference,examples}.md`
@@ -130,10 +131,10 @@ If a change "while you're here" tries to add any of these, surface it as a real 
 - `StrEnum` (not `class X(str, Enum)`) for user-facing enums.
 - `type NodeId = str`, `type EventId = str` — PEP 695 aliases; used in signatures for intent.
 - `@dataclass(slots=True)` on all graph models; `frozen=True` where immutability matters (`Entity`, `FactEdge`, `ToolCallRecord`).
-- `@override` from `typing` on hook subclasses (README §11.1) — typechecker catches typos in overridden method names.
+- Observability is wired through LangChain callbacks. After every successful ingest the decorator dispatches an `agent_pinboard:ingest` custom event (constant `INGEST_EVENT` exported from `agent_pinboard.decorator`); subscribers implement `BaseCallbackHandler.on_custom_event` and filter by name. There is no in-library hooks module — `agent_pinboard/hooks.py` was deleted in PR #3.
 - `match`-statement is the implementation of the 5 extraction rules (`agent_pinboard/extract.py::_walk`). Adding a rule = adding a `case`, not amending an `if` chain.
 - Per-session lock is `threading.RLock` (reentrant) — sync, but acquired in async paths too (the held window is microseconds around the in-memory delta merge, no awaits inside). The spec originally said `anyio.Lock` but that doesn't work synchronously; the deviation is documented inline in `agent_pinboard/session.py`.
-- Hook callbacks are wrapped in `try/except` by `agent_pinboard.hooks.fire`; a hook that raises **never breaks ingestion**, the failure is logged at ERROR. Preserve this contract when adding new hooks or hook implementations.
+- The decorator wraps `dispatch_custom_event` / `adispatch_custom_event` in `try/except` (and a separate guard for `RuntimeError` when called outside a runnable context, e.g. unit tests calling the wrapped tool directly). A handler that raises **never breaks ingestion** — the exception is logged at ERROR. Preserve this contract when adding new dispatch points.
 - Process-global state lives in `agent_pinboard/{registry,session,config}.py`. Each module exposes a `_reset()` function used by the autouse `reset_agent_pinboard_state` fixture in `tests/conftest.py`. **New modules with process-global state must expose `_reset()` and register it in that fixture.**
 - Sync ↔ async parity: every async public function should mirror its sync counterpart (`load_graph` / `aload_graph`, `persist_delta` / `apersist_delta`, etc.). Decorator wraps both in the same `@pin` based on whether the underlying tool is sync or async (detected via `asyncio.iscoroutinefunction`).
 - Optional integrations live under `agent_pinboard/integrations/`. Each module imports its dependency lazily and raises `ImportError(_DEPENDENCY_HINT)` with a friendly install command. Add new integrations the same way; keep them out of the top-level public API.
