@@ -57,6 +57,13 @@ dev = [
     "pytest-timeout>=2.4.0",
     "ruff>=0.6",
 ]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+    "mkdocs-static-i18n>=1.2",
+    "mike>=2.1",
+]
 
 [build-system]
 requires = ["hatchling"]

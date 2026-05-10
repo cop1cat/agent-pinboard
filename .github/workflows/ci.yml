@@ -5,6 +5,9 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+  # Allow the Release workflow to reuse this entire matrix as a gate
+  # before publishing to PyPI.
+  workflow_call:
 
 # A push that lands while CI is running on the same ref cancels the
 # in-flight run — saves runner minutes when you push a fixup commit.
